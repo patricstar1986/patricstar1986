@@ -112,6 +112,23 @@ kopierter Text reicht nicht.
 | JPEG/PNG | EXIF (Kamera, Software, Aufnahme-/Änderungsdatum), Bildbearbeitungssoftware |
 | ZIP | Inhalt, Passwortschutz, gefährliche Dateien |
 
+## Browser-Version (`web/echtheitspruefer.js`)
+
+JavaScript-Portierung für Web-Apps, läuft komplett lokal im Browser (kein Server nötig):
+
+```html
+<script src="echtheitspruefer.js"></script>
+<script>
+  const bericht = await Echtheitspruefer.pruefeMail(bytesOderText, 'mail.eml', { online: true });
+  // auch: pruefeText(text, {online}), pruefeDokument(bytes, name, {online})
+  console.log(bericht.alsText());   // Markdown-Bericht, z. B. als Kontext für Claude
+</script>
+```
+
+Unterschiede zur Python-Version: kein ClamAV/VirusTotal (im Browser nicht möglich), Datenbank-Abgleich
+nur mit Phishing.Database (wird alle 6 Std. geladen und in IndexedDB zwischengespeichert), keine DNS-Abfragen.
+Tests: `node tests/test_web.mjs`
+
 ## Grenzen (ehrlich)
 
 - Die **kryptografische Gültigkeit von PDF-/Office-Signaturen** wird nicht geprüft –

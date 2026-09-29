@@ -330,15 +330,26 @@ def _pruefe_pdf(bericht: Bericht, daten: bytes) -> None:
         )
 
     # --- Inkrementelle Updates -------------------------------------------
-    eofs = daten.count(b"%%EOF")
+    eof_pos = [m.end() for m in re.finditer(rb"%%EOF", daten)]
+    eofs = len(eof_pos)
     bericht.details["Speicherstände (%%EOF)"] = eofs
+    inhalt_ergaenzt = False
     if eofs > 1:
-        bericht.add(
-            "niedrig", "Bearbeitung",
-            f"Die Datei enthält {eofs} Speicherstände (inkrementelle Updates) – "
-            "sie wurde nach dem ersten Speichern ergänzt oder verändert "
-            "(auch bei Signaturen oder ausgefüllten Formularen normal).",
-        )
+        nachtraege = [daten[eof_pos[i]:eof_pos[i + 1]] for i in range(eofs - 1)]
+        inhalt_ergaenzt = any(re.search(rb"\d+\s+\d+\s+obj\b", n) for n in nachtraege)
+        if inhalt_ergaenzt:
+            bericht.add(
+                "niedrig", "Bearbeitung",
+                f"Die Datei enthält {eofs} Speicherstände – nach dem ersten Speichern wurden "
+                "Inhalte ergänzt oder verändert (auch bei Signaturen, ausgefüllten Formularen "
+                "oder Nachbearbeitung durch Programme normal).",
+            )
+        else:
+            bericht.add(
+                "info", "Bearbeitung",
+                f"Die Datei enthält {eofs} Speicherstände, nachträglich wurden aber nur "
+                "Verwaltungsdaten ergänzt (keine Inhalte) – unkritisch.",
+            )
 
     # --- Schriften: mehrere Teilmengen derselben Schrift ------------------
     subsets: dict[str, set[str]] = {}
@@ -346,12 +357,14 @@ def _pruefe_pdf(bericht: Bericht, daten: bytes) -> None:
         subsets.setdefault(schrift.decode("latin-1"), set()).add(praefix.decode())
     mehrfach = {s: p for s, p in subsets.items() if len(p) > 1}
     if mehrfach:
+        # Allein ist das häufig (z. B. Word-Export); nur zusammen mit anderen
+        # Bearbeitungsspuren ein Hinweis.
         bericht.add(
-            "niedrig", "Bearbeitung",
+            "niedrig" if (inhalt_ergaenzt or gefunden) else "info", "Bearbeitung",
             "Dieselbe Schrift ist mehrfach als separate Teilmenge eingebettet ("
             + ", ".join(sorted(mehrfach)[:5])
-            + ") – typisches Muster, wenn Text nachträglich eingefügt wurde (Heuristik, "
-            "kann auch beim Zusammenfügen von PDFs entstehen).",
+            + ") – kann auf nachträglich eingefügten Text hinweisen, entsteht aber auch "
+            "beim normalen Export aus Word oder beim Zusammenfügen von PDFs.",
         )
 
     # --- Aktive Inhalte ---------------------------------------------------
