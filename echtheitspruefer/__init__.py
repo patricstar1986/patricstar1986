@@ -4,4 +4,4 @@ from .dokument import pruefe_dokument
 from .mail import pruefe_mail
 
 __all__ = ["pruefe_dokument", "pruefe_mail"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

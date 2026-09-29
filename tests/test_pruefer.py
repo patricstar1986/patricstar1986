@@ -161,5 +161,110 @@ class DokumentTests(unittest.TestCase):
         self.assertEqual(b.hoechste_stufe(), "hoch")
 
 
+
+import os
+import tempfile
+from unittest import mock
+
+from echtheitspruefer import datenbanken
+from echtheitspruefer.mail import pruefe_text
+
+
+def _einstufung(bericht):
+    return bericht.details.get("Einstufung", "")
+
+
+class EinstufungTests(unittest.TestCase):
+    def test_phishing_text(self):
+        b = pruefe_text(
+            "Von: Sparkasse <info@sparkasse-sicherheit-online.com>\n"
+            "Ihr Konto wurde eingeschränkt. Bitte verifizieren Sie sich unter "
+            "https://sparkasse-sicherheit-online.com/login – sonst wird Ihre pushTAN deaktiviert."
+        )
+        self.assertIn("Phishing", _einstufung(b))
+        self.assertEqual(b.hoechste_stufe(), "hoch")
+
+    def test_ceo_betrug(self):
+        b = pruefe_text(
+            "Von: Chef <chef.firma@gmail.com>\nSind Sie am Platz? Ich sitze gerade in einem Meeting. "
+            "Bitte vertraulich eine Überweisung ausführen oder Google Play Gutscheine kaufen."
+        )
+        self.assertIn("Chef", _einstufung(b))
+
+    def test_sextortion(self):
+        b = pruefe_text(
+            "Ihr Gerät gehackt! Ich habe ein Video über Ihre Webcam aufgenommen. Zahlen Sie 1000 € "
+            "in Bitcoin an meine Wallet innerhalb von 48 Stunden, sonst schicke ich es an Ihre Kontakte."
+        )
+        self.assertIn("Erpressung", _einstufung(b))
+
+    def test_paket(self):
+        b = pruefe_text(
+            "Ihr Paket konnte nicht zugestellt werden. Bitte zahlen Sie die Zollgebühr von 1,99 € "
+            "für eine neue Zustellung: https://dhl-zustellung-info.top/pay"
+        )
+        self.assertIn("Paket", _einstufung(b))
+
+    def test_harmloser_text(self):
+        b = pruefe_text("Hallo Anna, treffen wir uns morgen um 10 Uhr zum Kaffee? Liebe Grüße, Tom")
+        self.assertEqual(b.hoechste_stufe(), "info")
+        self.assertIn("Keine typische", _einstufung(b))
+
+    def test_echte_mail_nicht_als_betrug(self):
+        b = pruefe_mail(ECHTE_MAIL, "echt.eml")
+        self.assertNotIn(b.hoechste_stufe(), ("mittel", "hoch"))
+
+    def test_vollstaendige_mail_als_text(self):
+        b = pruefe_text(PHISHING_MAIL.decode())
+        self.assertEqual(b.titel, "E-Mail-Prüfung")
+        self.assertIn("DMARC FEHLGESCHLAGEN", texte(b))
+
+
+class DatenbankTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        with open(os.path.join(self.tmp.name, "phishing_domains.txt"), "w") as f:
+            f.write("boese-bank-login.com\nsites.google.com\n")
+        with open(os.path.join(self.tmp.name, "urlhaus_online.txt"), "w") as f:
+            f.write("# kommentar\nhttp://198.51.100.9/malware.exe\n")
+        p = mock.patch.object(datenbanken, "CACHE", datenbanken.Path(self.tmp.name))
+        p.start()
+        self.addCleanup(p.stop)
+        env = mock.patch.dict(os.environ, {}, clear=False)
+        env.start()
+        self.addCleanup(env.stop)
+        for k in ("VIRUSTOTAL_API_KEY", "GOOGLE_SAFEBROWSING_KEY", "ABUSECH_AUTH_KEY"):
+            os.environ.pop(k, None)
+
+    def test_treffer(self):
+        e = datenbanken.pruefe_urls([
+            "https://secure.boese-bank-login.com/x", "http://198.51.100.9/malware.exe",
+            "https://sites.google.com/view/a", "https://www.beispiel.de/",
+        ])
+        stufen_ = sorted((t.quelle, t.stufe) for t in e.treffer)
+        self.assertEqual(stufen_, [("Phishing.Database", "hoch"), ("Phishing.Database", "mittel"),
+                                   ("URLhaus", "hoch")])
+        self.assertEqual(e.fehler, [])
+
+    def test_text_mit_datenbank(self):
+        b = pruefe_text("Bitte hier anmelden: https://boese-bank-login.com/", online=True)
+        self.assertIn("PHISHING-Seite", texte(b))
+        self.assertIn("Phishing", _einstufung(b))
+
+
+class VirenscanTests(unittest.TestCase):
+    def test_virusfund(self):
+        with mock.patch("echtheitspruefer.virenscan.clamav_scan", return_value=("virus", "Eicar-Test")):
+            b = pruefe_dokument(b"%PDF-1.4\n%%EOF", "x.pdf")
+        self.assertEqual(b.hoechste_stufe(), "hoch")
+        self.assertIn("Eicar-Test", texte(b))
+
+    def test_ohne_clamav(self):
+        with mock.patch("echtheitspruefer.virenscan.shutil.which", return_value=None):
+            b = pruefe_dokument(b"%PDF-1.4\n%%EOF", "x.pdf")
+        self.assertIn("Kein lokaler Virenscanner", texte(b))
+
+
 if __name__ == "__main__":
     unittest.main()

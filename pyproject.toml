@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "echtheitspruefer"
-version = "0.1.0"
+version = "0.2.0"
 description = "Prüft E-Mails und Dokumente auf Hinweise für Fälschung, Manipulation und Schadcode"
 readme = "README.md"
 requires-python = ">=3.9"

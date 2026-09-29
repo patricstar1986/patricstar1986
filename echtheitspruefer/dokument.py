@@ -17,7 +17,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 from xml.etree import ElementTree
 
+from . import datenbanken
 from .bericht import Bericht
+from .virenscan import virenpruefung
 
 # --------------------------------------------------------------------------- #
 # Dateityp-Erkennung
@@ -83,7 +85,7 @@ def erkenne_typ(daten: bytes) -> str:
 # Einstieg
 # --------------------------------------------------------------------------- #
 
-def pruefe_dokument(daten: bytes, name: str) -> Bericht:
+def pruefe_dokument(daten: bytes, name: str, online: bool = False, virenscan: bool = True) -> Bericht:
     bericht = Bericht("Dokumentprüfung", name)
     typ = erkenne_typ(daten)
     endungen = [s.lower() for s in PurePath(name).suffixes]
@@ -115,6 +117,10 @@ def pruefe_dokument(daten: bytes, name: str) -> Bericht:
             "HTML-Datei: wird im Browser geöffnet und wird oft für gefälschte "
             "Login-Seiten als Anhang verwendet.",
         )
+    if virenscan:
+        virenpruefung(bericht, daten, online)
+    if online and bericht.details.get("Links im PDF"):
+        datenbanken.urls_in_bericht(bericht, list(bericht.details["Links im PDF"]))
     return bericht
 
 

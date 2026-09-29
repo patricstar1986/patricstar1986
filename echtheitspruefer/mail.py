@@ -14,9 +14,11 @@ from email.message import EmailMessage
 from email.utils import getaddresses, parsedate_to_datetime
 from html.parser import HTMLParser
 
+from . import datenbanken
 from . import domains as d
 from .bericht import Bericht
 from .dokument import GEFAEHRLICHE_ENDUNGEN, MAKRO_ENDUNGEN, pruefe_dokument
+from .klassifikation import klassifizieren
 
 DRUCK_FORMULIERUNGEN = [
     "dringend", "sofort", "innerhalb von 24 stunden", "innerhalb von 48 stunden",
@@ -97,8 +99,11 @@ def pruefe_mail(roh: bytes, name: str = "mail.eml", online: bool = False,
     _pruefe_zustellweg(bericht, msg)
     if online:
         _pruefe_online(bericht, roh, von_dom)
-    _pruefe_inhalt(bericht, msg)
-    _pruefe_anhaenge(bericht, msg, anhaenge_pruefen)
+    gesamt_text, urls = _pruefe_inhalt(bericht, msg)
+    if online:
+        datenbanken.urls_in_bericht(bericht, urls)
+    _pruefe_anhaenge(bericht, msg, anhaenge_pruefen, online)
+    klassifizieren(bericht, gesamt_text, bool(urls))
     return bericht
 
 
@@ -362,7 +367,7 @@ _URL_RE = re.compile(r"https?://[^\s<>\"')\]]+", re.I)
 _DOMAIN_IM_TEXT = re.compile(r"^(?:https?://)?(?:www\.)?([a-z0-9-]+(?:\.[a-z0-9-]+)+)(?:[/:?#]|$)", re.I)
 
 
-def _pruefe_inhalt(bericht: Bericht, msg: EmailMessage) -> None:
+def _pruefe_inhalt(bericht: Bericht, msg: EmailMessage) -> tuple[str, list[str]]:
     html, text = _text_teile(msg)
     parser = _LinkParser()
     if html:
@@ -375,6 +380,7 @@ def _pruefe_inhalt(bericht: Bericht, msg: EmailMessage) -> None:
         links.append((url, ""))
 
     hosts: set[str] = set()
+    urls: list[str] = []
     gemeldet: set[tuple[str, str]] = set()
 
     def melde(stufe: str, txt: str) -> None:
@@ -394,6 +400,7 @@ def _pruefe_inhalt(bericht: Bericht, msg: EmailMessage) -> None:
         if not host:
             continue
         hosts.add(host)
+        urls.append(href)
         try:
             netloc = href.split("//", 1)[1].split("/", 1)[0]
         except IndexError:
@@ -429,11 +436,12 @@ def _pruefe_inhalt(bericht: Bericht, msg: EmailMessage) -> None:
         )
     if re.search(r"(passwort|password|pin|tan\b|kreditkarte|iban|credit card)", gesamt) and links:
         bericht.add("niedrig", "Inhalt", "Mail spricht Zugangs- oder Zahlungsdaten an und enthält Links.")
+    return gesamt, urls
 
 
 # --------------------------------------------------------------------------- #
 
-def _pruefe_anhaenge(bericht: Bericht, msg: EmailMessage, tief: bool) -> None:
+def _pruefe_anhaenge(bericht: Bericht, msg: EmailMessage, tief: bool, online: bool = False) -> None:
     namen = []
     for teil in msg.walk():
         if teil.is_multipart():
@@ -451,8 +459,67 @@ def _pruefe_anhaenge(bericht: Bericht, msg: EmailMessage, tief: bool) -> None:
         if tief:
             daten = teil.get_payload(decode=True) or b""
             if teil.get_content_type() == "message/rfc822" or dateiname.lower().endswith(".eml"):
-                unter = pruefe_mail(daten, dateiname, anhaenge_pruefen=True)
+                unter = pruefe_mail(daten, dateiname, online=online, anhaenge_pruefen=True)
             else:
-                unter = pruefe_dokument(daten, dateiname)
+                unter = pruefe_dokument(daten, dateiname, online=online)
             bericht.unterberichte.append(unter)
     bericht.details["Anhänge"] = namen
+
+
+# --------------------------------------------------------------------------- #
+# Eingefügter Text (z. B. aus dem Mailprogramm kopiert)
+# --------------------------------------------------------------------------- #
+
+_VON_ZEILE = re.compile(r"^\s*(?:von|from|absender)\s*:\s*(.+)$", re.I | re.M)
+
+
+def ist_vollstaendige_mail(text: str) -> bool:
+    kopf = text.lstrip()[:20000].split("\n\n", 1)[0]
+    return bool(re.search(r"^From:", kopf, re.M)) and bool(
+        re.search(r"^(Received|Message-ID|Authentication-Results|Return-Path):", kopf, re.M | re.I))
+
+
+def pruefe_text(text: str, name: str = "eingefügter Text", online: bool = False) -> Bericht:
+    """Prüft eine eingefügte Mail. Mit vollständigen Headern -> volle Mailprüfung,
+    sonst eingeschränkte Prüfung von Absenderzeile, Links und Inhalt."""
+    if ist_vollstaendige_mail(text):
+        return pruefe_mail(text.lstrip().encode("utf-8"), name, online=online)
+
+    bericht = Bericht("Text-Prüfung (ohne Mail-Header)", name)
+    bericht.add(
+        "info", "Eingeschränkt",
+        "Nur Text ohne technische Kopfzeilen: Ob der Absender echt ist (SPF/DKIM/DMARC), "
+        "kann so NICHT geprüft werden. Außerdem gehen beim Kopieren die echten Ziele von "
+        "Buttons/Links oft verloren. Für eine vollständige Prüfung die Mail im Original "
+        "einfügen (Gmail: ⋮ → 'Original anzeigen').",
+    )
+    m = _VON_ZEILE.search(text)
+    if m:
+        name_teil, adresse = getaddresses([m.group(1)])[0]
+        if "@" in adresse:
+            bericht.details["Absender (laut Text)"] = m.group(1).strip()
+            dom = d.domain_aus_adresse(adresse)
+            for stufe, txt in d.lookalike_pruefung(dom):
+                bericht.add(stufe, "Absender", txt)
+            name_klein = (name_teil or "").lower()
+            for marke in d.MARKEN:
+                if len(marke) >= 4 and re.search(rf"\b{re.escape(marke)}\b", name_klein) \
+                        and marke.replace("-", "") not in dom.replace("-", ""):
+                    bericht.add("mittel", "Absender",
+                                f"Anzeigename nennt '{marke}', die Adresse '{adresse}' passt nicht dazu.")
+                    break
+            if dom in ("gmail.com", "googlemail.com", "gmx.de", "gmx.net", "web.de", "outlook.com",
+                       "hotmail.com", "yahoo.com", "yahoo.de", "t-online.de", "icloud.com", "aol.com"):
+                bericht.add("niedrig", "Absender",
+                            f"Absender nutzt einen Freemail-Dienst ({dom}) – Firmen und Behörden tun das normalerweise nicht.")
+
+    nachricht = EmailMessage()
+    if re.search(r"<(a|p|div|html|table)\b", text, re.I):
+        nachricht.set_content(text, subtype="html")
+    else:
+        nachricht.set_content(text)
+    gesamt_text, urls = _pruefe_inhalt(bericht, nachricht)
+    if online:
+        datenbanken.urls_in_bericht(bericht, urls)
+    klassifizieren(bericht, gesamt_text, bool(urls))
+    return bericht

@@ -12,10 +12,12 @@ nur mit der Python-Standardbibliothek (Python ≥ 3.9) – es werden keine Datei
 ## Benutzung
 
 ```bash
-python -m echtheitspruefer mail.eml
-python -m echtheitspruefer rechnung.pdf vertrag.docx foto.jpg
+python -m echtheitspruefer mail.eml                 # Mail-Datei
+python -m echtheitspruefer rechnung.pdf foto.jpg    # Dokumente (inkl. Virenscan)
+python -m echtheitspruefer                          # Mailtext einfügen, mit Strg+D beenden
+python -m echtheitspruefer --text "Ihr Konto wurde gesperrt …"
+python -m echtheitspruefer mail.eml --online        # + Abgleich mit aktuellen Datenbanken
 python -m echtheitspruefer mail.eml --json          # maschinenlesbar
-python -m echtheitspruefer mail.eml --online        # zusätzliche DNS-Prüfungen
 ```
 
 Optional installieren (dann gibt es den Befehl `echtheitspruefer`):
@@ -26,6 +28,54 @@ pip install ".[online]"  # inkl. DNS/DKIM-Prüfung (dnspython, dkimpy)
 ```
 
 Exit-Code: `0` unauffällig · `1` Auffälligkeiten · `2` starke Warnzeichen.
+
+### Einstufung: Was für eine Mail ist das?
+
+Neben den Einzelbefunden schlägt das Tool eine **Einstufung** vor – mit Begründung
+und konkreter Empfehlung:
+
+- Phishing (Datendiebstahl) · Schadsoftware-Verteilung
+- Betrug: Paket-/Zustellmasche · Chef-/CEO-Masche · geänderte Bankverbindung ·
+  Vorschuss/Erbschaft/Gewinn · Fake-Inkasso/Mahnung · Anlage/Krypto · Job/Finanzagent
+- Erpressung (Sextortion) · Spam/Werbung · keine typische Masche erkannt
+
+Die Einstufung ist regelbasiert (Formulierungen + technische Befunde) und kann irren.
+
+### Eingefügter Text vs. Original-Mail
+
+Einfach kopierter Mailtext reicht für Einstufung, Links und Absenderzeile. Aber: Ob
+der Absender **echt** ist (SPF/DKIM/DMARC), lässt sich nur mit dem **Original inkl.
+Kopfzeilen** prüfen, und beim Kopieren gehen die echten Ziele von Buttons oft verloren.
+Am besten das Original einfügen bzw. als .eml speichern (siehe unten).
+
+### Abgleich mit aktuellen Datenbanken (`--online`)
+
+| Quelle | Prüft | Schlüssel nötig? |
+|---|---|---|
+| [Phishing.Database](https://github.com/Phishing-Database/Phishing.Database) | aktive Phishing-Domains | nein |
+| URLhaus (abuse.ch) | aktive Schadsoftware-URLs | nein (Text-Feed) |
+| VirusTotal | Links und Datei-Hashes (Ergebnis von ~70 Virenscannern) | ja: `VIRUSTOTAL_API_KEY` |
+| Google Safe Browsing | Links (Phishing/Malware) | ja: `GOOGLE_SAFEBROWSING_KEY` |
+| MalwareBazaar (abuse.ch) | Datei-Hashes | ja: `ABUSECH_AUTH_KEY` |
+
+Die Listen werden in `~/.cache/echtheitspruefer` zwischengespeichert und alle 6 Stunden
+erneuert. Für die Schlüssel-Dienste gibt es kostenlose Konten; Schlüssel als
+Umgebungsvariable setzen, z. B. `export VIRUSTOTAL_API_KEY=...`.
+Bei VirusTotal & Co. wird nur der **Hash** einer Datei abgefragt, nicht die Datei hochgeladen.
+
+**Kein Treffer heißt nicht „sicher“** – neue Betrugsseiten sind oft erst nach Stunden gelistet.
+
+### Virenscan von Dokumenten
+
+Dokumente und Mail-Anhänge werden automatisch mit **ClamAV** gescannt, sofern installiert:
+
+- Linux: `sudo apt install clamav && sudo freshclam`
+- macOS: `brew install clamav` (danach `freshclam` einrichten)
+- Windows: Installer von clamav.net, danach `freshclam` ausführen
+
+Zusätzlich (mit `--online` und API-Schlüssel) wird der Hash bei VirusTotal/MalwareBazaar abgefragt.
+Ohne ClamAV und ohne Schlüssel gibt es nur die eingebauten Strukturprüfungen (Makros,
+JavaScript, getarnte Programme …) – das ist **kein** vollwertiger Virenscan.
 
 ### So bekommst du eine Mail als .eml-Datei
 
@@ -72,7 +122,7 @@ kopierter Text reicht nicht.
   Hauptdomain (keine vollständige Public Suffix List).
 - Inhaltliche Fälschungen (z. B. geänderte Beträge in einem sauber neu erzeugten PDF)
   sind technisch oft nicht erkennbar – dann hilft nur Rückfrage beim Aussteller.
-- Kein Virenscanner: ein unauffälliges Ergebnis heißt nicht „virenfrei“.
+- Auch mit ClamAV/VirusTotal gilt: Brandneue Schadsoftware wird oft noch nicht erkannt.
 
 ## Tests
 
