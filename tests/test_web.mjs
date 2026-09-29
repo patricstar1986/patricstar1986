@@ -77,4 +77,19 @@ await test('Bericht entschärft HTML', async () => {
   const b = await E.pruefeText('Von: X <a@b.de>\n<a href="https://evil.example/"><img src=x onerror=alert(1)>www.bank.de</a>');
   assert(!b.alsText().includes('<img'));
 });
+await test('VirusTotal: Treffer, unbekannt, blockiert', async () => {
+  const pdf = new Uint8Array([37, 80, 68, 70, 45, 49, 46, 52, 10]);
+  const echt = globalThis.fetch;
+  try {
+    globalThis.fetch = async (u, o) => { assert.equal(o.headers['x-apikey'], 'K'); return new Response(JSON.stringify({ data: { attributes: { last_analysis_stats: { malicious: 30, undetected: 10 } } } }), { status: 200 }); };
+    let b = await E.pruefeDokument(pdf, 'x.pdf', { virustotalKey: 'K' });
+    assert.equal(b.hoechsteStufe(), 'hoch');
+    globalThis.fetch = async () => new Response('{}', { status: 404 });
+    b = await E.pruefeDokument(pdf, 'x.pdf', { virustotalKey: 'K' });
+    assert(b.befunde.some(x => x.text.includes('unbekannt')));
+    globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+    b = await E.pruefeDokument(pdf, 'x.pdf', { virustotalKey: 'K' });
+    assert(b.befunde.some(x => x.text.includes('CORS')) && b.details['VirusTotal (manuell prüfen)'].includes('/gui/file/'));
+  } finally { globalThis.fetch = echt; }
+});
 console.log(`\n${ok} Tests bestanden`);

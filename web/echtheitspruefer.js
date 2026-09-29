@@ -274,6 +274,35 @@
   }
 
   // ======================================================================
+  // VirusTotal (nur Hash-Abfrage – die Datei selbst wird NICHT hochgeladen)
+  // ======================================================================
+  async function virustotalHash(bericht, sha, schluessel) {
+    let r;
+    try {
+      r = await fetch('https://www.virustotal.com/api/v3/files/' + sha, { headers: { 'x-apikey': schluessel } });
+    } catch (e) {
+      bericht.add('info', 'VirusTotal', 'VirusTotal konnte aus dem Browser nicht abgefragt werden – vermutlich blockiert VirusTotal direkte Anfragen von Webseiten (CORS) oder das Netzwerk sperrt die Adresse. Über den Link unter „VirusTotal (manuell prüfen)“ lässt sich die Datei trotzdem nachschlagen.');
+      return;
+    }
+    if (r.status === 404) { bericht.add('info', 'VirusTotal', 'Datei ist bei VirusTotal unbekannt (wurde dort noch nie geprüft). Das ist weder gut noch schlecht – gezielt verschickte Schadsoftware ist oft neu.'); return; }
+    if (r.status === 401 || r.status === 403) { bericht.add('info', 'VirusTotal', 'VirusTotal hat den API-Schlüssel abgelehnt – bitte in den Einstellungen prüfen.'); return; }
+    if (r.status === 429) { bericht.add('info', 'VirusTotal', 'VirusTotal-Abfragelimit erreicht (kostenloser Zugang: wenige Abfragen pro Minute) – bitte später erneut versuchen.'); return; }
+    if (!r.ok) { bericht.add('info', 'VirusTotal', `VirusTotal-Abfrage fehlgeschlagen (HTTP ${r.status}).`); return; }
+    let daten;
+    try { daten = await r.json(); } catch (e) { bericht.add('info', 'VirusTotal', 'Antwort von VirusTotal war nicht lesbar.'); return; }
+    const attr = (daten.data && daten.data.attributes) || {};
+    const st = attr.last_analysis_stats || {};
+    const boese = st.malicious || 0, verdacht = st.suspicious || 0;
+    const gesamt = Object.values(st).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0);
+    const wann = attr.last_analysis_date ? new Date(attr.last_analysis_date * 1000).toLocaleDateString('de-DE') : 'unbekannt';
+    bericht.details['VirusTotal-Ergebnis'] = `${boese} schädlich, ${verdacht} verdächtig von ${gesamt} Scannern (letzte Analyse: ${wann})`;
+    const namen = attr.popular_threat_classification && attr.popular_threat_classification.suggested_threat_label;
+    if (boese >= 3) bericht.add('hoch', 'VirusTotal', `SCHADSOFTWARE: ${boese} von ${gesamt} Virenscannern erkennen diese Datei als schädlich${namen ? ` (${namen})` : ''}.`);
+    else if (boese || verdacht) bericht.add('mittel', 'VirusTotal', `${boese} Virenscanner melden „schädlich“, ${verdacht} „verdächtig“ (von ${gesamt}) – einzelne Treffer können Fehlalarme sein, Vorsicht.`);
+    else bericht.add('ok', 'VirusTotal', `Keiner von ${gesamt} Virenscannern bei VirusTotal meldet diese Datei (letzte Analyse: ${wann}).`);
+  }
+
+  // ======================================================================
   // MIME-Parser
   // ======================================================================
   function dekodiereWorte(s) {
@@ -494,7 +523,10 @@
     else if (typ === 'exe') bericht.add('hoch', 'Dateityp', 'Die Datei ist ein ausführbares Programm – nicht öffnen!');
     else if (typ === 'html' && !RISKANT.has(endung)) bericht.add('mittel', 'Dateityp', 'HTML-Datei: wird im Browser geöffnet und wird oft für gefälschte Login-Seiten als Anhang verwendet.');
 
-    bericht.add('info', 'Virenscan', 'Im Browser ist kein Virenscanner verfügbar – geprüft wurden nur Struktur und Metadaten (Makros, JavaScript, getarnte Programme …). Im Zweifel die Datei zusätzlich mit einem Virenscanner prüfen.');
+    const sha = bericht.details['SHA-256'];
+    if (sha) bericht.details['VirusTotal (manuell prüfen)'] = 'https://www.virustotal.com/gui/file/' + sha;
+    if (opt.virustotalKey && sha) await virustotalHash(bericht, sha, opt.virustotalKey);
+    else bericht.add('info', 'Virenscan', 'Im Browser ist kein Virenscanner verfügbar – geprüft wurden nur Struktur und Metadaten (Makros, JavaScript, getarnte Programme …). Ohne VirusTotal-Schlüssel kann die Datei über den Link „VirusTotal (manuell prüfen)“ nachgeschlagen werden (es wird nur der Prüfwert übertragen, nicht die Datei).');
     if (opt.online && Array.isArray(bericht.details['Links im PDF'])) await urlsAbgleichen(bericht, bericht.details['Links im PDF'], opt.phishingListe);
     return bericht;
   }
