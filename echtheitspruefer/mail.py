@@ -154,7 +154,7 @@ def _pruefe_absender(bericht, msg, von_name, von_adr, von_dom, antwort_adr, rp_d
             f"Return-Path-Domain ({rp_dom}) weicht vom Absender ab – bei Versanddienstleistern "
             "normal, entscheidend ist das DMARC-Ergebnis.",
         )
-    if msgid_dom and not _gleiche_org(msgid_dom, von_dom) and not _gleiche_org(msgid_dom, rp_dom):
+    if msgid_dom and "." in msgid_dom and not _gleiche_org(msgid_dom, von_dom) and not _gleiche_org(msgid_dom, rp_dom):
         bericht.add("info", "Absender", f"Message-ID stammt von einer anderen Domain ({msgid_dom}).")
 
 
@@ -303,31 +303,53 @@ def _pruefe_online(bericht: Bericht, roh: bytes, von_dom: str) -> None:
                                       "(pip install dnspython).")
         return
 
-    def txt(name: str) -> list[str]:
+    def txt(name: str) -> list[str] | None:
+        """TXT-Einträge; [] = sicher keine vorhanden, None = Abfrage fehlgeschlagen."""
         try:
             return [b"".join(r.strings).decode("utf-8", "replace")
-                    for r in dns.resolver.resolve(name, "TXT", lifetime=5)]
-        except Exception:
+                    for r in dns.resolver.resolve(name, "TXT", lifetime=8)]
+        except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer):
             return []
+        except Exception:
+            return None
+
+    def existiert(name: str) -> bool | None:
+        for typ in ("MX", "A", "AAAA"):
+            try:
+                dns.resolver.resolve(name, typ, lifetime=8)
+                return True
+            except dns.resolver.NXDOMAIN:
+                return False
+            except dns.resolver.NoAnswer:
+                continue
+            except Exception:
+                return None
+        return True  # Name existiert, hat aber keine dieser Einträge
+
+    def beschreibe(eintraege: list[str] | None, praefix: str) -> tuple[str, list[str] | None]:
+        if eintraege is None:
+            return "Abfrage fehlgeschlagen", None
+        treffer = [t for t in eintraege if t.lower().startswith(praefix)]
+        return (treffer[0] if treffer else "keiner"), treffer
 
     if von_dom:
         org = d.organisationsdomain(von_dom)
-        spf = [t for t in txt(von_dom) if t.lower().startswith("v=spf1")]
-        dmarc = [t for t in txt(f"_dmarc.{von_dom}") or txt(f"_dmarc.{org}")
-                 if t.lower().startswith("v=dmarc1")]
-        bericht.details["SPF-Eintrag (DNS)"] = spf[0] if spf else "keiner"
-        bericht.details["DMARC-Eintrag (DNS)"] = dmarc[0] if dmarc else "keiner"
-        try:
-            dns.resolver.resolve(von_dom, "MX", lifetime=5)
-        except Exception:
-            try:
-                dns.resolver.resolve(von_dom, "A", lifetime=5)
-            except Exception:
-                bericht.add("hoch", "Online", f"Absenderdomain '{von_dom}' existiert im DNS nicht.")
-        if not dmarc:
+        spf_text, _ = beschreibe(txt(von_dom), "v=spf1")
+        dmarc_roh = txt(f"_dmarc.{von_dom}")
+        if dmarc_roh == [] and org != von_dom:
+            dmarc_roh = txt(f"_dmarc.{org}")
+        dmarc_text, dmarc = beschreibe(dmarc_roh, "v=dmarc1")
+        bericht.details["SPF-Eintrag (DNS)"] = spf_text
+        bericht.details["DMARC-Eintrag (DNS)"] = dmarc_text
+        vorhanden = existiert(von_dom)
+        if vorhanden is False:
+            bericht.add("hoch", "Online", f"Absenderdomain '{von_dom}' existiert im DNS nicht.")
+        if dmarc == []:
             bericht.add("niedrig", "Online", f"'{von_dom}' hat keine DMARC-Richtlinie – leichter fälschbar.")
-        elif re.search(r"\bp\s*=\s*none", dmarc[0], re.I):
+        elif dmarc and re.search(r"\bp\s*=\s*none", dmarc[0], re.I):
             bericht.add("info", "Online", f"DMARC-Richtlinie von '{von_dom}' ist 'none' (nur Beobachtung).")
+        if vorhanden is None or "fehlgeschlagen" in (spf_text + dmarc_text):
+            bericht.add("info", "Online", "Einzelne DNS-Abfragen sind fehlgeschlagen (Netzwerk/Zeitüberschreitung).")
 
     try:
         import dkim  # type: ignore
