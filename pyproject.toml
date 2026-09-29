@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "echtheitspruefer"
+version = "0.1.0"
+description = "Prüft E-Mails und Dokumente auf Hinweise für Fälschung, Manipulation und Schadcode"
+readme = "README.md"
+requires-python = ">=3.9"
+
+[project.optional-dependencies]
+online = ["dnspython", "dkimpy"]
+
+[project.scripts]
+echtheitspruefer = "echtheitspruefer.cli:main"
+
+[tool.setuptools]
+packages = ["echtheitspruefer"]
