@@ -92,4 +92,22 @@ await test('VirusTotal: Treffer, unbekannt, blockiert', async () => {
     assert(b.befunde.some(x => x.text.includes('CORS')) && b.details['VirusTotal (manuell prüfen)'].includes('/gui/file/'));
   } finally { globalThis.fetch = echt; }
 });
+await test('Eigene Marken und Domains', async () => {
+  E.setEigene({ marken: 'MeineBank', domains: 'https://www.meinebank.at/login\nmeinebank.co.at' });
+  const L = E._intern.lookalike;
+  assert.deepEqual(L('meinebank.at'), []);
+  assert.deepEqual(L('mail.meinebank.co.at'), []);
+  const stufe = (d) => (L(d)[0] || [])[0];
+  assert.equal(stufe('meinebank.com'), 'hoch');          // gleicher Name, fremde Domain
+  assert.equal(stufe('meinebank.at.evil.ru'), 'hoch');   // Marke nur in Subdomain
+  assert.equal(stufe('meinebnak.at'), 'hoch');           // Tippfehler
+  assert.equal(stufe('me1nebank.at'), 'hoch');           // Zeichenersatz
+  assert.equal(stufe('meinebank-sicherheit.com'), 'mittel');
+  assert.equal(stufe('beispiel.de'), undefined);
+  const b = await E.pruefeText('Von: MeineBank <info@meinebank-sicherheit.com>\nBitte anmelden: https://meinebank-sicherheit.com/login');
+  assert(b.befunde.some(x => x.kategorie === 'Absender' && x.text.includes('eurer Marke')));
+  E.setEigene({});
+  assert.deepEqual(E.getEigene(), { marken: [], domains: [] });
+  assert.deepEqual(L('meinebank.com'), []);
+});
 console.log(`\n${ok} Tests bestanden`);

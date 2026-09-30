@@ -142,6 +142,20 @@
     't-online.de', 'icloud.com', 'aol.com', 'aon.at', 'chello.at']);
 
   // Nur syntaktisch gültige Domains zurückgeben (z. B. nicht 'gmail.c...'), sonst ''.
+  // Eigene Marken (Namen) und echte Domains der eigenen Organisation – vom Nutzer gepflegt.
+  let EIGENE = { marken: [], domains: [] };
+  function setEigene(o) {
+    const zeilen = (x) => (Array.isArray(x) ? x : String(x || '').split(/[\n,;]+/)).map(z => String(z).trim().toLowerCase()).filter(Boolean);
+    const dom = (z) => z.replace(/^[a-z]+:\/\//, '').replace(/^.*@/, '').replace(/^www\./, '').split(/[\/?#:\s]/)[0].replace(/\.$/, '');
+    o = o || {};
+    EIGENE = {
+      marken: [...new Set(zeilen(o.marken).map(z => z.replace(/[^a-z0-9äöüß-]/g, '')).filter(z => z.length >= 3))],
+      domains: [...new Set(zeilen(o.domains).map(dom).filter(z => z.includes('.')))],
+    };
+    return EIGENE;
+  }
+  const istEigeneDomain = (d) => !!d && EIGENE.domains.some(e => orgDomain(d) === orgDomain(e));
+
   const domainAusAdresse = (a) => {
     if (!a || !a.includes('@')) return '';
     const d = a.split('@').pop().trim().replace(/[>\s]+$/, '').toLowerCase().replace(/\.$/, '');
@@ -172,13 +186,31 @@
   const reEsc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const gleicheOrg = (a, b) => !!(a && b) && orgDomain(a) === orgDomain(b);
 
+  function lookalikeEigene(domain, org, sub, label) {
+    const norm = label.replace(/0/g, 'o').replace(/1/g, 'l').replace(/3/g, 'e').replace(/5/g, 's').replace(/4/g, 'a').replace(/7/g, 't').replace(/rn/g, 'm').replace(/vv/g, 'w');
+    for (const m of EIGENE.marken) {
+      if (sub.includes(m)) return ['hoch', `'${m}' (eure Marke) steht nur in der Subdomain – die tatsächliche Domain ist '${org}' und gehört nicht zu euren Domains.`];
+      if (label === m) return ['hoch', `Domain '${domain}' trägt den Namen eurer Marke '${m}', gehört aber nicht zu euren eigenen Domains.`];
+      if (norm === m) return ['hoch', `Domain '${domain}' imitiert eure Marke '${m}' durch Zeichenersatz.`];
+      const ab = levenshtein(label, m);
+      if (ab > 0 && ab <= (m.length <= 5 ? 1 : 2)) return ['hoch', `Domain '${domain}' ähnelt stark eurer Marke '${m}' (Tippfehler-Domain?).`];
+      if (label.includes(m) || norm.includes(m)) return ['mittel', `Domain '${domain}' enthält den Namen eurer Marke '${m}', gehört aber nicht zu euren eigenen Domains – bei einer echten Partnerdomain bitte in die Liste eintragen.`];
+    }
+    return null;
+  }
+
   function lookalike(domain) {
     const erg = [];
     if (!domain) return erg;
+    if (istEigeneDomain(domain)) return erg;
     if (domain.includes('xn--')) erg.push(['mittel', `Domain '${domain}' ist Punycode (internationalisiert) – häufig für Homoglyphen-Tricks genutzt (z. B. kyrillisches 'а' statt 'a').`]);
     if (/[^\x00-\x7F]/.test(domain)) erg.push(['mittel', `Domain '${domain}' enthält Nicht-ASCII-Zeichen – mögliche Homoglyphen.`]);
     const org = orgDomain(domain);
     const sub = domain !== org ? domain.slice(0, -org.length).replace(/\.$/, '').split('.') : [];
+    if (EIGENE.marken.length && !BEKANNT_ECHT.has(org)) {
+      const treffer = lookalikeEigene(domain, org, sub, hauptLabel(domain));
+      if (treffer) { erg.push(treffer); return erg; }
+    }
     for (const m of MARKEN) {
       if (m.length >= 4 && sub.includes(m) && hauptLabel(domain) !== m && !BEKANNT_ECHT.has(org)) {
         erg.push(['hoch', `'${m}' steht nur in der Subdomain – die tatsächliche Domain ist '${org}'.`]);
@@ -854,8 +886,9 @@
     'password expires', 'final notice', 'gift card', 'geschenkkarte', 'bitcoin', 'überweisung heute noch'];
 
   function markeImNamen(name, dom) {
+    if (istEigeneDomain(dom)) return null;
     const k = (name || '').toLowerCase().replace(/[^a-z0-9äöü-]/g, ' ');
-    for (const m of MARKEN) if (m.length >= 4 && new RegExp(`\\b${reEsc(m)}\\b`).test(k) && !dom.replace(/-/g, '').includes(m.replace(/-/g, ''))) return m;
+    for (const m of MARKEN.concat(EIGENE.marken)) if (m.length >= 4 && new RegExp(`\\b${reEsc(m)}\\b`).test(k) && !dom.replace(/-/g, '').includes(m.replace(/-/g, ''))) return m;
     return null;
   }
 
@@ -914,6 +947,7 @@
     else {
       if (k.getAll('from').length > 1) bericht.add('hoch', 'Absender', 'Mehrere From-Header – typischer Trick, um Prüfungen zu umgehen.');
       lookalike(vonDom).forEach(([s, t]) => bericht.add(s, 'Absender', t));
+      if (istEigeneDomain(vonDom)) bericht.add('info', 'Absender', `Die Absenderdomain '${vonDom}' steht in eurer Liste eigener Domains – ob die Mail wirklich von dort kam, zeigt das DMARC-Ergebnis.`);
       for (const a of (vonName.match(/[\w.+-]+@[\w-]+(?:\.[\w-]+)+/g) || [])) if (a.toLowerCase() !== vonAdr.toLowerCase()) bericht.add('hoch', 'Absender', `Anzeigename zeigt die Adresse '${a}', tatsächlich gesendet von '${vonAdr}'.`);
       const mk = markeImNamen(vonName, vonDom);
       if (mk) bericht.add('mittel', 'Absender', `Anzeigename nennt '${mk}', die Absenderdomain '${vonDom}' passt aber nicht dazu.`);
@@ -1037,5 +1071,5 @@
     return bericht;
   }
 
-  global.Echtheitspruefer = { pruefeMail, pruefeText, pruefeDokument, istVollstaendigeMail, ladePhishingListe, Bericht, _intern: { lookalike, orgDomain, parseTeil, zipEintraege } };
+  global.Echtheitspruefer = { pruefeMail, pruefeText, pruefeDokument, istVollstaendigeMail, ladePhishingListe, setEigene, getEigene: () => EIGENE, Bericht, _intern: { lookalike, orgDomain, parseTeil, zipEintraege } };
 })(typeof window !== 'undefined' ? window : globalThis);

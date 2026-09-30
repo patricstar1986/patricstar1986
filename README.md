@@ -125,6 +125,10 @@ JavaScript-Portierung für Web-Apps, läuft komplett lokal im Browser (kein Serv
 </script>
 ```
 
+Eigene Marken und Domains (z. B. der eigenen Bank) lassen sich mit `Echtheitspruefer.setEigene({ marken: 'meinebank', domains: 'meinebank.at' })`
+festlegen: Diese Domains gelten als echt, ähnlich aussehende oder den Namen enthaltende Fremd-Domains werden gewarnt.
+`Echtheitspruefer.getEigene()` liefert den aktuellen Stand. Die Python-Version kennt diese Einstellung noch nicht.
+
 Unterschiede zur Python-Version: kein ClamAV/VirusTotal (im Browser nicht möglich), Datenbank-Abgleich
 nur mit Phishing.Database (wird alle 6 Std. geladen und in IndexedDB zwischengespeichert), keine DNS-Abfragen.
 Tests: `node tests/test_web.mjs`
