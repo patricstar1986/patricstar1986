@@ -129,9 +129,21 @@ Eigene Marken und Domains (z. B. der eigenen Bank) lassen sich mit `Echtheitspru
 festlegen: Diese Domains gelten als echt, ähnlich aussehende oder den Namen enthaltende Fremd-Domains werden gewarnt.
 `Echtheitspruefer.getEigene()` liefert den aktuellen Stand. Die Python-Version kennt diese Einstellung noch nicht.
 
+**Outlook-Nachrichten (.msg):** `Echtheitspruefer.pruefeMsg(bytes, 'mail.msg', opt)` liest eine im klassischen Outlook
+gespeicherte Nachricht, setzt daraus Kopfzeilen, Text und Anhänge wieder zu einer E-Mail zusammen und prüft sie wie eine `.eml`
+(`Echtheitspruefer.msgZuEml(bytes)` liefert nur die zusammengesetzte Mail). Zum Lesen des Containers wird SheetJS (`XLSX.CFB`)
+benötigt; es wird aus `window.XLSX` genommen oder mit `opt.CFB` übergeben.
+- Internet-Kopfzeilen (Received, Authentication-Results …) sind nur enthalten, wenn Outlook sie gespeichert hat, also bei
+  aus dem Internet empfangenen Mails. Bei interner Exchange-Mail fehlen sie, der Bericht sagt das offen.
+- Eine eigene DKIM-Prüfung ist nicht möglich, SPF/DKIM/DMARC stammen aus den Vermerken des empfangenden Mailservers.
+- Nur Rich-Text (RTF) wird vereinfacht gelesen, eingebettete Nachrichten werden als eigener Anhang geprüft.
+- Getestet mit selbst erzeugten Dateien nach der Formatbeschreibung [MS-OXMSG]; eine unabhängige Bibliothek (`extract-msg`)
+  liest diese Dateien richtig. Mit echten Outlook-Dateien wurde nicht getestet.
+
 Unterschiede zur Python-Version: kein ClamAV/VirusTotal (im Browser nicht möglich), Datenbank-Abgleich
-nur mit Phishing.Database (wird alle 6 Std. geladen und in IndexedDB zwischengespeichert), keine DNS-Abfragen.
-Tests: `node tests/test_web.mjs`
+nur mit Phishing.Database (wird alle 6 Std. geladen und in IndexedDB zwischengespeichert), keine DNS-Abfragen,
+`.msg` nur in der Browser-Version.
+Tests: `node tests/test_web.mjs`, für `.msg`: `npm install xlsx` und `node tests/test_msg.mjs`
 
 ## Grenzen (ehrlich)
 

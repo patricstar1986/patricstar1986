@@ -1029,14 +1029,316 @@
       if (GEFAEHRLICH.has(e) || MAKRO.has(e)) bericht.add('hoch', 'Anhang', `Gefährlicher Anhang: ${dn}`);
       if (dn.includes('‮')) bericht.add('hoch', 'Anhang', `Dateiname enthält Richtungs-Umkehrzeichen (Tarnung): ${dn}`);
       if (opt.anhaengePruefen !== false && (opt._tiefe || 0) < 3) {
+        const msgFaehig = e === '.msg' && (opt.CFB || global.CFB || (global.XLSX && global.XLSX.CFB));
         const unter = (t.typ === 'message/rfc822' || e === '.eml')
           ? await pruefeMail(t.bytes, dn, { ...opt, _tiefe: (opt._tiefe || 0) + 1 })
+          : msgFaehig ? await pruefeMsg(t.bytes, dn, { ...opt, _tiefe: (opt._tiefe || 0) + 1 })
           : await pruefeDokument(t.bytes, dn, opt);
         bericht.unterberichte.push(unter);
       }
     }
     bericht.details['Anhänge'] = namen;
     klassifizieren(bericht, gesamt, urls.length > 0);
+    return bericht;
+  }
+
+  // ======================================================================
+  // Outlook-.msg  ->  E-Mail im Originalformat (.eml)
+  // ======================================================================
+  // Eine .msg-Datei ist ein Microsoft-Compound-File mit MAPI-Eigenschaften. Die Internet-Kopfzeilen (Received,
+  // Authentication-Results …) stehen – falls Outlook sie gespeichert hat – in der Eigenschaft 0x007D. Daraus, aus
+  // Text/HTML und den Anhängen wird eine .eml zusammengesetzt, die dann wie jede andere Mail geprüft wird.
+  // Der Baustein zum Lesen des Containers (SheetJS "CFB") wird von außen geliefert (window.XLSX.CFB oder opt.CFB).
+  const MSG_CP = { 874: 'windows-874', 932: 'shift_jis', 936: 'gbk', 949: 'euc-kr', 950: 'big5', 1250: 'windows-1250', 1251: 'windows-1251',
+    1252: 'windows-1252', 1253: 'windows-1253', 1254: 'windows-1254', 1255: 'windows-1255', 1256: 'windows-1256', 1257: 'windows-1257',
+    1258: 'windows-1258', 20127: 'us-ascii', 20866: 'koi8-r', 28591: 'iso-8859-1', 28592: 'iso-8859-2', 28595: 'iso-8859-5',
+    28597: 'iso-8859-7', 28599: 'iso-8859-9', 28605: 'iso-8859-15', 65001: 'utf-8' };
+  const MSG_MIME = { pdf: 'application/pdf', doc: 'application/msword', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xls: 'application/vnd.ms-excel', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', ppt: 'application/vnd.ms-powerpoint',
+    pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', txt: 'text/plain', csv: 'text/csv', html: 'text/html', htm: 'text/html',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', zip: 'application/zip', eml: 'message/rfc822', msg: 'application/vnd.ms-outlook',
+    rtf: 'application/rtf', xml: 'application/xml', json: 'application/json' };
+  // Vorbelegung des Wörterbuchs für komprimierten RTF-Text (MS-OXRTFCP), 207 Zeichen
+  const LZFU_WOERTERBUCH = '{\\rtf1\\ansi\\mac\\deff0\\deftab720{\\fonttbl;}{\\f0\\fnil \\froman \\fswiss \\fmodern \\fscript \\fdecor MS Sans SerifSymbolArialTimes New RomanCourier{\\colortbl\\red0\\green0\\blue0\r\n\\par \\pard\\plain\\f0\\fs20\\b\\i\\u\\tab\\tx';
+
+  function msgDecode(bytes, cp) {
+    try { return new TextDecoder(MSG_CP[cp] || 'windows-1252').decode(bytes); } catch (e) { return new TextDecoder('windows-1252').decode(bytes); }
+  }
+  function msgUtf8OderAnsi(bytes) {
+    try { return new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch (e) { return new TextDecoder('windows-1252').decode(bytes); }
+  }
+  function msgIndex(cfb) {
+    const s = new Map(), ordner = new Map();   // Pfad in Kleinbuchstaben -> Daten bzw. Originalpfad
+    cfb.FullPaths.forEach((p, i) => {
+      const rel = p.split('/').slice(1).join('/');
+      if (!rel) return;
+      const e = cfb.FileIndex[i];
+      if (rel.endsWith('/')) ordner.set(rel.slice(0, -1).toLowerCase(), rel.slice(0, -1));
+      else s.set(rel.toLowerCase(), e && e.content ? Uint8Array.from(e.content) : new Uint8Array(0));
+    });
+    return { s, ordner };
+  }
+  function msgProp(m, prefix, id) {
+    const basis = (prefix ? prefix.toLowerCase() + '/' : '') + '__substg1.0_' + id.toLowerCase();
+    for (const typ of ['001f', '001e', '0102']) { const d = m.s.get(basis + typ); if (d) return { typ: typ.toUpperCase(), daten: d }; }
+    return null;
+  }
+  function msgText(e, cp) {
+    if (!e) return '';
+    if (e.typ === '001F') return new TextDecoder('utf-16le').decode(e.daten).replace(/\u0000+$/, '');
+    if (e.typ === '001E') return msgDecode(e.daten, cp).replace(/\u0000+$/, '');
+    return '';
+  }
+  function msgKinder(m, prefix, muster) {
+    const pre = prefix ? prefix.toLowerCase() + '/' : '';
+    const out = [];
+    m.ordner.forEach((orig, low) => {
+      if (!low.startsWith(pre)) return;
+      const rest = low.slice(pre.length);
+      if (!rest.includes('/') && muster.test(rest)) out.push(orig);
+    });
+    return out.sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+  }
+  // Feste Eigenschaften (Zahl, Datum, Ja/Nein) aus __properties_version1.0; kopf = 32 (Nachricht), 24 (eingebettet), 8 (Anhang/Empfänger)
+  function msgFeste(m, prefix, kopf) {
+    const d = m.s.get((prefix ? prefix.toLowerCase() + '/' : '') + '__properties_version1.0');
+    const out = {};
+    if (!d) return out;
+    const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    for (let p = kopf; p + 16 <= d.length; p += 16) {
+      const tag = dv.getUint32(p, true), typ = tag & 0xFFFF, id = tag >>> 16;
+      if (typ === 0x0003) out[id] = dv.getInt32(p + 8, true);
+      else if (typ === 0x000B) out[id] = dv.getUint16(p + 8, true) !== 0;
+      else if (typ === 0x0040) out[id] = (dv.getUint32(p + 12, true) * 4294967296 + dv.getUint32(p + 8, true)) / 10000 - 11644473600000;
+    }
+    return out;
+  }
+  function b64Zeilen(bytes) {
+    let s = '';
+    for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+    return btoa(s).replace(/.{1,76}/g, '$&\r\n').replace(/\r\n$/, '');
+  }
+  const msgB64Text = (t) => btoa(String.fromCharCode.apply(null, enc.encode(t)));
+  const msgNurAscii = (t) => !/[^\x20-\x7e\t]/.test(t);
+  const msgWort = (t) => msgNurAscii(t) ? t : `=?UTF-8?B?${msgB64Text(t)}?=`;
+  const msgAnf = (t) => `"${t.replace(/["\\\r\n]/g, ' ')}"`;
+  function msgAdresse(name, mail) {
+    name = (name || '').trim(); mail = (mail || '').trim();
+    if (name && mail && name.toLowerCase() !== mail.toLowerCase()) return `${msgNurAscii(name) ? msgAnf(name) : msgWort(name)} <${mail}>`;
+    return mail || (name ? (msgNurAscii(name) ? msgAnf(name) : msgWort(name)) : '');
+  }
+  const MSG_MIME_KOPF = /^(content-type|content-transfer-encoding|content-disposition|mime-version|content-length|content-id|content-description|content-language)$/i;
+  function msgKopfBereinigen(block) {
+    const aus = []; let weglassen = false;
+    for (const z of block.replace(/\r\n?|\n/g, '\n').split('\n')) {
+      if (!z.trim()) { if (aus.length) break; continue; }
+      if (/^[ \t]/.test(z)) { if (!weglassen) aus.push(' ' + (msgNurAscii(z.trim()) ? z.trim() : msgWort(z.trim()))); continue; }
+      const i = z.indexOf(':');
+      if (i < 1) continue;
+      const nm = z.slice(0, i).trim();
+      weglassen = MSG_MIME_KOPF.test(nm);
+      if (weglassen) continue;
+      const w = z.slice(i + 1).trim();
+      aus.push(nm + ': ' + (msgNurAscii(w) ? w : msgWort(w)));
+    }
+    return aus;
+  }
+  function lzfuEntpacken(d) {
+    if (d.length < 16) return null;
+    const dv = new DataView(d.buffer, d.byteOffset, d.byteLength);
+    const rohLaenge = dv.getUint32(4, true), typ = dv.getUint32(8, true);
+    if (typ === 0x414C454D) return d.subarray(16, 16 + rohLaenge);   // 'MELA': unkomprimiert
+    if (typ !== 0x75465A4C) return null;                              // 'LZFu'
+    const dict = new Uint8Array(4096);
+    for (let i = 0; i < LZFU_WOERTERBUCH.length; i++) dict[i] = LZFU_WOERTERBUCH.charCodeAt(i);
+    let schreib = LZFU_WOERTERBUCH.length;
+    const out = [];
+    let p = 16;
+    while (p < d.length && out.length < rohLaenge + 4096) {
+      const flags = d[p++];
+      for (let bit = 0; bit < 8; bit++) {
+        if (flags & (1 << bit)) {
+          if (p + 1 >= d.length) return Uint8Array.from(out.slice(0, rohLaenge));
+          const hi = d[p++], lo = d[p++];
+          let off = (hi << 4) | (lo >> 4); const len = (lo & 0x0F) + 2;
+          if (off === schreib % 4096) return Uint8Array.from(out.slice(0, rohLaenge));
+          for (let k = 0; k < len; k++) { const b = dict[off]; out.push(b); dict[schreib % 4096] = b; schreib++; off = (off + 1) % 4096; }
+        } else {
+          if (p >= d.length) return Uint8Array.from(out.slice(0, rohLaenge));
+          const b = d[p++]; out.push(b); dict[schreib % 4096] = b; schreib++;
+        }
+      }
+    }
+    return Uint8Array.from(out.slice(0, rohLaenge));
+  }
+  // Einfache Umwandlung von RTF in Text (Fallback, wenn die Nachricht weder Text noch HTML enthält)
+  function rtfZuText(rtf) {
+    let out = '', tiefe = 0, ignorieren = -1, uc = 1, skip = 0;
+    const ZIELE = ['fonttbl', 'colortbl', 'stylesheet', 'info', 'pict', 'header', 'footer', 'object', 'themedata', 'datastore'];
+    for (let i = 0; i < rtf.length; i++) {
+      const c = rtf[i];
+      if (c === '{') { tiefe++; continue; }
+      if (c === '}') { if (ignorieren === tiefe) ignorieren = -1; tiefe--; continue; }
+      if (c === '\\') {
+        const n = rtf[i + 1];
+        if (n === '\\' || n === '{' || n === '}') { if (ignorieren < 0 && !skip) out += n; else if (skip) skip--; i++; continue; }
+        if (n === '*') { if (ignorieren < 0) ignorieren = tiefe; i++; continue; }
+        if (n === "'") { const b = parseInt(rtf.substr(i + 2, 2), 16); if (ignorieren < 0 && !skip) out += new TextDecoder('windows-1252').decode(Uint8Array.of(b || 63)); else if (skip) skip--; i += 3; continue; }
+        const m = /^\\([a-zA-Z]+)(-?\d+)? ?/.exec(rtf.slice(i, i + 40));
+        if (m) {
+          const w = m[1], zahl = m[2] === undefined ? null : parseInt(m[2], 10);
+          if (ZIELE.includes(w) && ignorieren < 0) ignorieren = tiefe;
+          else if (ignorieren < 0) {
+            if (w === 'par' || w === 'line' || w === 'row') out += '\n';
+            else if (w === 'tab' || w === 'cell') out += '\t';
+            else if (w === 'uc' && zahl !== null) uc = zahl;
+            else if (w === 'u' && zahl !== null) { out += String.fromCharCode(zahl < 0 ? zahl + 65536 : zahl); skip = uc; }
+          }
+          i += m[0].length - 1; continue;
+        }
+        i++; continue;
+      }
+      if (c === '\r' || c === '\n') continue;
+      if (skip) { skip--; continue; }
+      if (ignorieren < 0) out += c;
+    }
+    return out.replace(/\n{3,}/g, '\n\n').trim();
+  }
+
+  function msgZuEmlIntern(m, prefix, tiefe, kopfLaenge, hinweise) {
+    const fest = msgFeste(m, prefix, kopfLaenge);
+    const cp = fest[0x3FFD] || 0;
+    const T = (id) => msgText(msgProp(m, prefix, id), cp);
+    // --- Kopfzeilen ---
+    const block = T('007D');
+    const hatKopf = block.trim().length > 0;
+    let kopf = [];
+    let senderIntern = false;
+    if (hatKopf) kopf = msgKopfBereinigen(block);
+    else {
+      const addrTyp = (T('0C1E') || T('0064')).toUpperCase();
+      let smtp = T('5D01') || T('5D02');
+      if (!smtp) { const e = T('0C1F') || T('0065'); if (/@/.test(e) && (!addrTyp || addrTyp === 'SMTP')) smtp = e; }
+      const name = T('0C1A') || T('0042');
+      if (!smtp) senderIntern = true;
+      const von = msgAdresse(name, smtp);
+      if (von) kopf.push('From: ' + von);
+      const listen = { 1: [], 2: [] };
+      for (const rp of msgKinder(m, prefix, /^__recip_version1\.0_#[0-9a-f]{8}$/)) {
+        const rf = msgFeste(m, rp, 8);
+        const rt = msgText(msgProp(m, rp, '3002'), cp).toUpperCase();
+        let mail = msgText(msgProp(m, rp, '39FE'), cp);
+        if (!mail && rt === 'SMTP') mail = msgText(msgProp(m, rp, '3003'), cp);
+        const a = msgAdresse(msgText(msgProp(m, rp, '3001'), cp), mail);
+        if (a && listen[rf[0x0C15]]) listen[rf[0x0C15]].push(a);
+      }
+      if (!listen[1].length && T('0E04')) listen[1] = T('0E04').split(';').map(x => x.trim()).filter(Boolean).map(x => msgAdresse(x, ''));
+      if (!listen[2].length && T('0E03')) listen[2] = T('0E03').split(';').map(x => x.trim()).filter(Boolean).map(x => msgAdresse(x, ''));
+      if (listen[1].length) kopf.push('To: ' + listen[1].join(', '));
+      if (listen[2].length) kopf.push('Cc: ' + listen[2].join(', '));
+      const betreff = (T('0037') || T('0070')).replace(/^\u0001[\u0001-\u001f]/, '').replace(/\u0001/g, '');
+      kopf.push('Subject: ' + msgWort(betreff));
+      const zeit = fest[0x0039] || fest[0x0E06];
+      if (zeit) kopf.push('Date: ' + new Date(zeit).toUTCString().replace('GMT', '+0000'));
+      const mid = T('1035');
+      if (mid) kopf.push('Message-ID: ' + (mid.startsWith('<') ? mid : '<' + mid + '>'));
+    }
+    // --- Inhalt ---
+    const cpNet = fest[0x3FDE] || 0;
+    let plain = '', html = '', rtfHinweis = false;
+    const p1000 = msgProp(m, prefix, '1000');
+    if (p1000) plain = msgText(p1000, cp);
+    const p1013 = msgProp(m, prefix, '1013');
+    if (p1013) html = p1013.typ === '0102' ? (cpNet || cp ? msgDecode(p1013.daten, cpNet || cp) : msgUtf8OderAnsi(p1013.daten)) : msgText(p1013, cp);
+    if (!plain.trim() && !html.trim()) {
+      const p1009 = msgProp(m, prefix, '1009');
+      const roh = p1009 && p1009.typ === '0102' ? lzfuEntpacken(p1009.daten) : null;
+      if (roh) { plain = rtfZuText(new TextDecoder('windows-1252').decode(roh)); rtfHinweis = true; }
+    }
+    if (rtfHinweis) hinweise.push('Die Nachricht enthält nur Rich-Text (RTF). Der Text wurde vereinfacht daraus gelesen; Formatierung und Links darin können fehlen.');
+    // --- Anhänge ---
+    const anhaenge = [];
+    let nr = 0;
+    for (const ap of msgKinder(m, prefix, /^__attach_version1\.0_#[0-9a-f]{8}$/)) {
+      nr++;
+      let name = msgText(msgProp(m, ap, '3707'), cp) || msgText(msgProp(m, ap, '3704'), cp) || msgText(msgProp(m, ap, '3001'), cp);
+      const ext = msgText(msgProp(m, ap, '3703'), cp);
+      const cid = msgText(msgProp(m, ap, '3712'), cp);
+      const eingebettetPfad = ap + '/__substg1.0_3701000D';
+      if (m.ordner.has(eingebettetPfad.toLowerCase())) {
+        if (tiefe >= 3) { hinweise.push('Eine tief verschachtelte eingebettete Nachricht wurde nicht gelesen.'); continue; }
+        const sub = msgZuEmlIntern(m, eingebettetPfad, tiefe + 1, 24, hinweise);
+        anhaenge.push({ typ: 'message/rfc822', name: (name || 'Eingebettete Nachricht').replace(/\.(msg|eml)$/i, '') + '.eml', text: sub.eml });
+        continue;
+      }
+      const dat = msgProp(m, ap, '3701');
+      if (!dat || dat.typ !== '0102') { hinweise.push(`Der Anhang „${name || nr}“ ist ein eingebettetes Objekt und wurde nicht gelesen.`); continue; }
+      name = (name || `Anhang ${nr}`).replace(/[\u0000-\u001f\\\/:*?"<>|]+/g, '_');
+      if (ext && !/\.[A-Za-z0-9]{1,8}$/.test(name)) name += ext.startsWith('.') ? ext : '.' + ext;
+      const e2 = (/\.([A-Za-z0-9]{1,8})$/.exec(name) || [])[1];
+      const typ = (msgText(msgProp(m, ap, '370E'), cp) || '').toLowerCase() || MSG_MIME[(e2 || '').toLowerCase()] || 'application/octet-stream';
+      anhaenge.push({ typ, name, cid, daten: dat.daten, inline: !!cid && /^image\//.test(typ) && (msgFeste(m, ap, 8)[0x3714] & 4) !== 0 });
+    }
+    // --- Zusammensetzen ---
+    const CRLF = '\r\n';
+    const dateiName = (n) => msgNurAscii(n) ? `filename="${n.replace(/"/g, '')}"` : `filename*=UTF-8''${encodeURIComponent(n)}`;
+    const nameParam = (n) => msgNurAscii(n) ? `name="${n.replace(/"/g, '')}"` : `name*=UTF-8''${encodeURIComponent(n)}`;
+    const teile = [];
+    if (plain.trim()) teile.push({ kopf: ['Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64'], body: b64Zeilen(enc.encode(plain)) });
+    if (html.trim()) teile.push({ kopf: ['Content-Type: text/html; charset=utf-8', 'Content-Transfer-Encoding: base64'], body: b64Zeilen(enc.encode(html)) });
+    anhaenge.forEach(a => {
+      if (a.typ === 'message/rfc822') teile.push({ kopf: ['Content-Type: message/rfc822', `Content-Disposition: attachment; ${dateiName(a.name)}`], body: a.text });
+      else teile.push({ kopf: [`Content-Type: ${a.typ}; ${nameParam(a.name)}`, `Content-Disposition: ${a.inline ? 'inline' : 'attachment'}; ${dateiName(a.name)}`, ...(a.cid ? [`Content-ID: <${a.cid.replace(/^<|>$/g, '')}>`] : []), 'Content-Transfer-Encoding: base64'], body: b64Zeilen(a.daten) });
+    });
+    if (!teile.length) teile.push({ kopf: ['Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64'], body: '' });
+    let eml;
+    if (teile.length === 1) eml = kopf.concat(['MIME-Version: 1.0'], teile[0].kopf).join(CRLF) + CRLF + CRLF + teile[0].body + CRLF;
+    else {
+      const nurText = anhaenge.length === 0;
+      const grenze = `=_rb_msg_${tiefe}_${nurText ? 'alt' : 'mix'}`;
+      eml = kopf.concat(['MIME-Version: 1.0', `Content-Type: multipart/${nurText ? 'alternative' : 'mixed'}; boundary="${grenze}"`]).join(CRLF) + CRLF + CRLF;
+      teile.forEach(t => { eml += '--' + grenze + CRLF + t.kopf.join(CRLF) + CRLF + CRLF + t.body + CRLF; });
+      eml += '--' + grenze + '--' + CRLF;
+    }
+    return { eml, hatKopfzeilen: hatKopf, senderIntern };
+  }
+
+  function msgZuEml(daten, cfbLib) {
+    const bytes = alsBytes(daten);
+    if (bytes.length < 512 || latin1(bytes, 0, 8) !== '\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1') throw new Error('keine Outlook-Nachricht (.msg): Dateikopf fehlt');
+    const CFB = cfbLib || global.CFB || (global.XLSX && global.XLSX.CFB);
+    if (!CFB) throw new Error('der Baustein zum Lesen von .msg-Dateien ist nicht geladen');
+    let container;
+    try { container = CFB.parse(bytes); } catch (e) { throw new Error('der Datei-Container ist beschädigt: ' + e.message); }
+    const m = msgIndex(container);
+    const hatMsg = [...m.s.keys()].some(k => k.startsWith('__substg1.0_') || k === '__properties_version1.0');
+    if (!hatMsg) throw new Error('die Datei enthält keine Outlook-Nachricht');
+    const hinweise = [];
+    const r = msgZuEmlIntern(m, '', 0, 32, hinweise);
+    return { eml: r.eml, hatKopfzeilen: r.hatKopfzeilen, senderIntern: r.senderIntern, hinweise };
+  }
+
+  async function pruefeMsg(daten, name, opt = {}) {
+    let erg;
+    try { erg = msgZuEml(daten, opt.CFB); }
+    catch (e) {
+      const b = new Bericht('E-Mail-Prüfung', name || 'nachricht.msg');
+      b.add('mittel', 'Format', `Die .msg-Datei konnte nicht gelesen werden (${e.message}). Sie ist beschädigt oder keine Outlook-Nachricht – bei unerwarteten Dateien ist das selbst ein Warnzeichen.`);
+      return b;
+    }
+    const bericht = await pruefeMail(erg.eml, name || 'nachricht.msg', opt);
+    bericht.add('info', 'Format', 'Quelle: Outlook-.msg-Datei. Die Mail wurde aus den gespeicherten Kopfzeilen, dem Text und den Anhängen zusammengesetzt. Eine eigene DKIM-Prüfung ist bei .msg nicht möglich; SPF/DKIM/DMARC stammen aus den Vermerken des empfangenden Mailservers.');
+    erg.hinweise.forEach(h => bericht.add('info', 'Format', h));
+    if (!erg.hatKopfzeilen) {
+      // Ohne Internet-Kopfzeilen (interne Exchange-Mail oder von Outlook nicht gespeichert) fehlt zwangsläufig alles zur Herkunft
+      bericht.befunde.forEach(b => {
+        if (b.kategorie === 'Authentifizierung' && b.text.startsWith("Kein 'Authentication-Results'")) { b.stufe = 'niedrig'; b.text = 'In dieser .msg-Datei sind keine Internet-Kopfzeilen gespeichert (typisch bei interner Exchange-Mail oder wenn Outlook sie nicht mitspeichert). SPF, DKIM und DMARC lassen sich daher nicht prüfen. In Outlook: Nachricht öffnen, Datei, Eigenschaften, Internetkopfzeilen.'; }
+        else if (b.kategorie === 'Zustellweg' && b.text.startsWith('Keine Received-Header')) { b.stufe = 'niedrig'; b.text = 'Keine Received-Kopfzeilen gespeichert – der Zustellweg lässt sich aus der .msg-Datei nicht nachvollziehen.'; }
+        else if (erg.senderIntern && b.kategorie === 'Absender' && b.text.startsWith('Keine gültige Absenderadresse')) { b.stufe = 'info'; b.text = 'Der Absender ist eine Exchange-interne Adresse (keine Internet-Adresse).'; }
+      });
+      // Die Einstufung "Unklar" beruhte auf den jetzt herabgestuften Befunden
+      if (/^Unklar/.test(bericht.details['Einstufung'] || '') && RANG[bericht.hoechsteStufe()] <= RANG.niedrig) bericht.details['Einstufung'] = 'Keine typische Betrugsmasche erkannt';
+    }
     return bericht;
   }
 
@@ -1071,5 +1373,5 @@
     return bericht;
   }
 
-  global.Echtheitspruefer = { pruefeMail, pruefeText, pruefeDokument, istVollstaendigeMail, ladePhishingListe, setEigene, getEigene: () => EIGENE, Bericht, _intern: { lookalike, orgDomain, parseTeil, zipEintraege } };
+  global.Echtheitspruefer = { pruefeMail, pruefeMsg, msgZuEml, pruefeText, pruefeDokument, istVollstaendigeMail, ladePhishingListe, setEigene, getEigene: () => EIGENE, Bericht, _intern: { lookalike, orgDomain, parseTeil, zipEintraege } };
 })(typeof window !== 'undefined' ? window : globalThis);
