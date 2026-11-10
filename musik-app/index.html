@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#121418">
+  <meta name="color-scheme" content="dark light">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Musik">
+  <meta name="description" content="Music Assistant über Home Assistant steuern">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/icon-180.png">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css?v=1">
+  <title>Musik</title>
+</head>
+<body>
+
+  <!-- Anmeldung -->
+  <div id="login" class="login" hidden>
+    <div class="login-card">
+      <img src="icons/icon.svg" alt="" class="login-logo">
+      <h1>Musik</h1>
+      <p class="muted">Steuert deinen Music Assistant über Home Assistant.</p>
+
+      <label for="hassUrl">Adresse von Home Assistant</label>
+      <input id="hassUrl" type="url" inputmode="url" autocomplete="url" spellcheck="false"
+             placeholder="http://homeassistant.local:8123">
+      <p id="mixedWarn" class="warn" hidden>
+        Diese Seite läuft über <b>https</b>, Home Assistant aber über <b>http</b>. Das blockiert der
+        Browser. Öffne die App über dieselbe Adresse wie Home Assistant (siehe Anleitung).
+      </p>
+      <button id="loginBtn" class="btn primary wide">Mit Home Assistant anmelden</button>
+
+      <details class="token-login">
+        <summary>Stattdessen mit Token anmelden</summary>
+        <p class="muted small">
+          In Home Assistant: Profil (unten links) → <b>Sicherheit</b> → <b>Langlebige Zugriffstoken</b>
+          → Token erstellen und hier einfügen. Nötig, wenn die App nicht über Home Assistant
+          selbst ausgeliefert wird.
+        </p>
+        <label for="token">Zugriffstoken</label>
+        <textarea id="token" rows="3" spellcheck="false" autocomplete="off"></textarea>
+        <button id="tokenBtn" class="btn wide">Mit Token verbinden</button>
+      </details>
+
+      <p id="loginError" class="error" role="alert" hidden></p>
+    </div>
+  </div>
+
+  <!-- App -->
+  <div id="app" class="app" hidden>
+    <header class="topbar">
+      <button id="playerBtn" class="player-btn" aria-haspopup="dialog">
+        <span class="ico" data-icon="speaker"></span>
+        <span id="playerName" class="player-name">Player wählen</span>
+        <span class="ico small" data-icon="chevron"></span>
+      </button>
+      <button id="settingsBtn" class="icon-btn" aria-label="Einstellungen">
+        <span class="ico" data-icon="gear"></span>
+      </button>
+    </header>
+
+    <div id="banner" class="banner" role="status" hidden></div>
+
+    <main id="main">
+      <!-- Läuft gerade -->
+      <section id="view-now" class="view now">
+        <div class="now-art-wrap">
+          <img id="nowArt" class="now-art" alt="" hidden>
+          <div id="nowArtPh" class="now-art placeholder"><span class="ico huge" data-icon="note"></span></div>
+        </div>
+        <div class="now-info">
+          <div class="now-text">
+            <h2 id="nowTitle" class="now-title">Nichts in der Wiedergabe</h2>
+            <p id="nowArtist" class="now-artist"></p>
+            <p id="nowAlbum" class="now-album muted"></p>
+          </div>
+
+          <div class="progress">
+            <div id="progressBar" class="progress-bar" role="slider" aria-label="Wiedergabeposition"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" tabindex="0">
+              <div id="progressFill" class="progress-fill"></div>
+            </div>
+            <div class="progress-times muted small">
+              <span id="posTime">–:––</span><span id="durTime">–:––</span>
+            </div>
+          </div>
+
+          <div class="controls">
+            <button id="shuffleBtn" class="icon-btn" aria-label="Zufallswiedergabe"><span class="ico" data-icon="shuffle"></span></button>
+            <button id="prevBtn" class="icon-btn big" aria-label="Zurück"><span class="ico" data-icon="prev"></span></button>
+            <button id="playBtn" class="play-btn" aria-label="Wiedergabe/Pause"><span class="ico" data-icon="play"></span></button>
+            <button id="nextBtn" class="icon-btn big" aria-label="Weiter"><span class="ico" data-icon="next"></span></button>
+            <button id="repeatBtn" class="icon-btn" aria-label="Wiederholen"><span class="ico" data-icon="repeat"></span></button>
+          </div>
+
+          <div class="volume">
+            <button id="muteBtn" class="icon-btn" aria-label="Stumm"><span class="ico" data-icon="volume"></span></button>
+            <input id="volume" type="range" min="0" max="100" step="1" value="0" aria-label="Lautstärke">
+            <span id="volVal" class="muted small vol-val">0</span>
+            <button id="powerBtn" class="icon-btn" aria-label="Ein/Aus"><span class="ico" data-icon="power"></span></button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bibliothek -->
+      <section id="view-library" class="view" hidden>
+        <div class="chips" id="libTypes" role="tablist" aria-label="Kategorie"></div>
+        <div class="lib-tools">
+          <input id="libFilter" type="search" placeholder="In der Bibliothek filtern" aria-label="Filtern">
+          <select id="libOrder" aria-label="Sortierung">
+            <option value="name">Name</option>
+            <option value="timestamp_added_desc">Zuletzt hinzugefügt</option>
+            <option value="last_played_desc">Zuletzt gespielt</option>
+            <option value="play_count_desc">Meist gespielt</option>
+            <option value="random">Zufällig</option>
+          </select>
+          <button id="libFav" class="chip" aria-pressed="false"><span class="ico small" data-icon="heart"></span> Favoriten</button>
+        </div>
+        <div id="libList"></div>
+        <div id="libMore" class="more"></div>
+      </section>
+
+      <!-- Suche -->
+      <section id="view-search" class="view" hidden>
+        <input id="searchInput" class="search-input" type="search" placeholder="Künstler, Alben, Titel, Radio …"
+               aria-label="Suche" enterkeyhint="search">
+        <div class="chips" id="searchTypes" aria-label="Suchen in"></div>
+        <div id="searchResults"></div>
+      </section>
+
+      <!-- Detailansicht (Album, Playlist, Künstler …) -->
+      <section id="view-detail" class="view" hidden>
+        <button id="backBtn" class="back-btn"><span class="ico small" data-icon="back"></span> Zurück</button>
+        <div id="detail"></div>
+      </section>
+    </main>
+
+    <div id="mini" class="mini" hidden>
+      <button id="miniOpen" class="mini-open" aria-label="Aktuelle Wiedergabe öffnen">
+        <img id="miniArt" class="mini-art" alt="">
+        <span class="mini-text">
+          <span id="miniTitle" class="mini-title"></span>
+          <span id="miniArtist" class="mini-artist muted"></span>
+        </span>
+      </button>
+      <button id="miniPlay" class="icon-btn" aria-label="Wiedergabe/Pause"><span class="ico" data-icon="play"></span></button>
+      <button id="miniNext" class="icon-btn" aria-label="Weiter"><span class="ico" data-icon="next"></span></button>
+      <div id="miniProgress" class="mini-progress"></div>
+    </div>
+
+    <nav class="tabbar" aria-label="Bereiche">
+      <button class="tab active" data-tab="now"><span class="ico" data-icon="note"></span><span>Läuft</span></button>
+      <button class="tab" data-tab="library"><span class="ico" data-icon="library"></span><span>Bibliothek</span></button>
+      <button class="tab" data-tab="search"><span class="ico" data-icon="search"></span><span>Suche</span></button>
+    </nav>
+  </div>
+
+  <!-- Auswahlfenster von unten (Player, Aktionen, Einstellungen) -->
+  <div id="sheetBackdrop" class="sheet-backdrop" hidden></div>
+  <div id="sheet" class="sheet" role="dialog" aria-modal="true" hidden>
+    <div class="sheet-handle"></div>
+    <h3 id="sheetTitle" class="sheet-title"></h3>
+    <div id="sheetBody"></div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+  <script type="module" src="app.js?v=1"></script>
+</body>
+</html>

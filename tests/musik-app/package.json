@@ -1,0 +1,13 @@
+{
+  "name": "musik-app-tests",
+  "private": true,
+  "type": "module",
+  "description": "Browser-Tests der Musik-App gegen einen nachgebauten Home-Assistant-Server",
+  "scripts": {
+    "mock": "node mock-ha.mjs",
+    "test": "node test.mjs"
+  },
+  "devDependencies": {
+    "ws": "^8.18.0"
+  }
+}

@@ -162,3 +162,10 @@ Tests: `node tests/test_web.mjs`, für `.msg`: `npm install xlsx` und `node test
 ```bash
 python -m unittest -v
 ```
+
+---
+
+## Weiteres Projekt: Musik-App für Music Assistant
+
+Im Ordner [`musik-app/`](musik-app/README.md) liegt eine Web-App (PWA) für iPhone und Windows,
+mit der sich der Music Assistant über Home Assistant steuern lässt: Wiedergabe, Bibliothek, Suche.
