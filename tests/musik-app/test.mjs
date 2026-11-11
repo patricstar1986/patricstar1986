@@ -406,6 +406,24 @@ await test('iPhone: Bedienung passt auf den Bildschirm', async () => {
   await shot(phone, 'iphone-suche');
 });
 
+await test('Update: veraltete Startdatei im Zwischenspeicher lädt sich selbst neu', async () => {
+  const fs = await import('node:fs');
+  const dir = new URL('../../musik-app/', import.meta.url);
+  const read = (f) => fs.readFileSync(new URL(f, dir), 'utf8');
+  const version = JSON.parse(read('version.json')).version;
+  assert.match(read('app.js'), new RegExp(`APP_VERSION = '${version.replace(/\\./g, '\\\\.')}'`), 'app.js und version.json nennen dieselbe Version');
+  for (const [file, refs] of [['index.html', ['style.css', 'app.js']], ['app.js', ['ha.js', 'local.js']], ['sw.js', ['app.js', 'ha.js', 'local.js', 'style.css']]]) {
+    for (const ref of refs) assert.ok(read(file).includes(`${ref}?v=${version}`), `${file} verweist auf ${ref}?v=${version}`);
+  }
+  // Home Assistant meldet eine neuere Version, der Browser hat noch die alte Seite
+  const old = await newPage();
+  await old.route('**/version.json*', (r) => r.fulfill({ contentType: 'application/json', body: '{"version":"9.9.9"}' }));
+  await old.goto(APP);
+  await old.waitForURL(`${APP}?v=9.9.9`);
+  await old.waitForSelector('#login:not([hidden])');   // keine Endlosschleife: die Seite läuft danach normal
+  await old.context().close();
+});
+
 await test('Keine JavaScript-Fehler', async () => {
   assert.deepEqual(errors, []);
 });

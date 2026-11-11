@@ -1,9 +1,9 @@
 // Service Worker: hält nur die App-Dateien für einen schnellen Start bereit.
 // Anfragen an Home Assistant (/api, /auth, Bilder) werden nie zwischengespeichert.
 // Läuft nur über https (oder localhost) – über http lässt der Browser ihn weg, die App geht trotzdem.
-const CACHE = 'musik-v3';
+const CACHE = 'musik-v4';
 const SCOPE_PATH = new URL('./', self.location).pathname;
-const FILES = ['./', 'index.html', 'style.css?v=3', 'app.js?v=3', 'ha.js?v=3', 'local.js?v=3', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png'];
+const FILES = ['./', 'index.html', 'style.css?v=2.1.1', 'app.js?v=2.1.1', 'ha.js?v=2.1.1', 'local.js?v=2.1.1', 'manifest.webmanifest', 'version.json', 'icons/icon.svg', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));
@@ -23,7 +23,7 @@ self.addEventListener('fetch', (e) => {
   if (url.searchParams.has('code')) return; // Rückkehr von der Anmeldung
   // Zuerst Netz (immer aktuelle Version), bei Ausfall Zwischenspeicher
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' }) // immer bei Home Assistant nachfragen, ob es Neues gibt
       .then((res) => {
         if (res.ok) { const copy = res.clone(); caches.open(CACHE).then((c) => c.put(e.request, copy)); }
         return res;

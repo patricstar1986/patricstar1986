@@ -2,10 +2,10 @@
 import {
   AuthError, loadAuth, saveAuth, normalizeUrl, servedByHomeAssistant, startLogin,
   finishLoginFromUrl, logout, HAConnection, F, supports, currentPosition, formatTime,
-} from './ha.js?v=3';
-import { LocalPlayer, defaultDeviceName } from './local.js?v=3';
+} from './ha.js?v=2.1.1';
+import { LocalPlayer, defaultDeviceName } from './local.js?v=2.1.1';
 
-const APP_VERSION = '2.1.0';
+const APP_VERSION = '2.1.1';
 const PAGE = 50;
 const SETTINGS_KEY = 'musikapp.settings';
 const GROUPING = 524288; // MediaPlayerEntityFeature.GROUPING
@@ -1459,7 +1459,28 @@ function bindUI() {
 }
 
 // ---------- Start ----------
+/**
+ * Browser (vor allem die App auf dem Home-Bildschirm) halten die Startdatei oft lange im
+ * Zwischenspeicher. Deshalb fragt die App bei jedem Start ohne Zwischenspeicher nach, welche
+ * Version in Home Assistant liegt, und lädt sich bei Bedarf über eine neue Adresse frisch.
+ */
+async function reloadIfOutdated() {
+  const q = new URLSearchParams(location.search);
+  if (q.has('code')) return false; // Rückkehr von der Anmeldung nicht unterbrechen
+  try {
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (!r.ok) return false;
+    const { version } = await r.json();
+    if (!version || version === APP_VERSION || q.get('v') === version) return false;
+    location.replace(location.pathname + '?v=' + encodeURIComponent(version));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function init() {
+  if (await reloadIfOutdated()) return;
   bindUI();
   renderLibTypes();
   renderSearchTypes();
