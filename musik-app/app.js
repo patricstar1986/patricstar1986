@@ -2,10 +2,10 @@
 import {
   AuthError, loadAuth, saveAuth, normalizeUrl, servedByHomeAssistant, startLogin,
   finishLoginFromUrl, logout, HAConnection, F, supports, currentPosition, formatTime,
-} from './ha.js?v=2';
-import { LocalPlayer, defaultDeviceName } from './local.js?v=2';
+} from './ha.js?v=3';
+import { LocalPlayer, defaultDeviceName } from './local.js?v=3';
 
-const APP_VERSION = '2.0.0';
+const APP_VERSION = '2.1.0';
 const PAGE = 50;
 const SETTINGS_KEY = 'musikapp.settings';
 const GROUPING = 524288; // MediaPlayerEntityFeature.GROUPING
@@ -28,6 +28,8 @@ const P = {
   down: 'M7.41 8.59L12 13.17l4.59-4.58L18 10l-6 6-6-6 1.41-1.41z',
   gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z',
   home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
+  forward: 'M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z',
+  broadcast: 'M12 10.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM8.46 8.46a5 5 0 000 7.08l1.06-1.06a3.5 3.5 0 010-4.96L8.46 8.46zm7.08 0l-1.06 1.06a3.5 3.5 0 010 4.96l1.06 1.06a5 5 0 000-7.08zM5.64 5.64a9 9 0 000 12.72l1.06-1.06a7.5 7.5 0 010-10.6L5.64 5.64zm12.72 0L17.3 6.7a7.5 7.5 0 010 10.6l1.06 1.06a9 9 0 000-12.72z',
   note: 'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z',
   library: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5c0 1.38-1.12 2.5-2.5 2.5S10 13.88 10 12.5s1.12-2.5 2.5-2.5c.57 0 1.08.19 1.5.51V5h4v2z',
   search: 'M15.5 14h-.79l-.28-.27A6.471 6.471 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z',
@@ -98,6 +100,7 @@ const S = {
   tab: 'home',
   stack: [],
   home: { loaded: false, req: 0 },
+  radio: { loaded: false, req: 0 },
   lib: { type: 'playlist', fav: false, order: 'name', filter: '', items: [], offset: 0, done: false, loading: false, req: 0, error: null },
   search: { q: '', type: 'all', libraryOnly: false, req: 0 },
   queue: { req: 0, lastKey: '' },
@@ -131,14 +134,14 @@ const TYPE_LABEL = {
 };
 const PLAYABLE_TYPES = new Set(['artist', 'album', 'audiobook', 'folder', 'playlist', 'podcast', 'track', 'radio']);
 const TYPE_ICON = { artist: 'artist', album: 'album', track: 'note', playlist: 'playlist', radio: 'radio', podcast: 'radio', audiobook: 'library' };
-const TAB_TITLE = { home: 'Start', search: 'Suche', library: 'Bibliothek' };
+const TAB_TITLE = { home: 'Startseite', radio: 'Radio', search: 'Suchen', library: 'Mediathek' };
 
-// Reihen auf der Startseite. „quick“ = kompakte Kacheln ganz oben.
+// Reihen auf der Startseite. „hero“ = große Kacheln ganz oben.
 const HOME_SHELVES = [
-  { key: 'quick', type: 'playlist', order: 'last_played_desc', limit: 8, quick: true },
+  { key: 'hero', type: 'playlist', order: 'last_played_desc', limit: 8, hero: true },
   { key: 'recent', title: 'Zuletzt gehört', type: 'album', order: 'last_played_desc', limit: 14 },
-  { key: 'new', title: 'Neu in deiner Bibliothek', type: 'album', order: 'timestamp_added_desc', limit: 14 },
-  { key: 'artists', title: 'Künstler aus deiner Bibliothek', type: 'artist', order: 'random', limit: 14 },
+  { key: 'new', title: 'Neu in deiner Mediathek', type: 'album', order: 'timestamp_added_desc', limit: 14 },
+  { key: 'artists', title: 'Künstler aus deiner Mediathek', type: 'artist', order: 'random', limit: 14 },
   { key: 'radio', title: 'Radiosender', type: 'radio', order: 'name', limit: 14 },
   { key: 'discover', title: 'Wiederentdecken', type: 'album', order: 'random', limit: 14 },
 ];
@@ -217,7 +220,9 @@ async function connect() {
     renderAll();
     if (!S.home.loaded) loadHome();
     if (S.tab === 'library' && !S.lib.items.length) loadLibrary(true);
-    if (S.settings.localEnabled && !local.active) startLocal(S.settings.localSelected ? 'select' : false);
+    // Standard: Das Gerät, auf dem die App läuft, ist das Wiedergabegerät.
+    if (!local.active && S.settings.localDefault !== false) startLocal('select');
+    else if (!local.active && S.settings.localEnabled) startLocal(S.settings.localSelected ? 'select' : false);
   } catch (e) {
     showBanner('Fehler beim Laden: ' + e.message);
   }
@@ -366,6 +371,7 @@ function selectPlayer(id, { quiet = false } = {}) {
   renderNow(); renderMini();
   const next = currentPlayer();
   if (isLocal(next)) local.unlock();
+  if (!quiet) S.pendingLocalSelect = false; // bewusste Wahl geht vor
   if (!quiet && prev && next && prev.state === 'playing' && next.state !== 'playing') {
     toast(`Auf „${playerName(prev)}“ läuft noch Musik.`, false, {
       label: 'Hierher holen', onClick: () => transferQueue(prev.entity_id, next.entity_id),
@@ -426,6 +432,7 @@ async function startLocal(select) {
 
 function stopLocal() {
   S.settings.localEnabled = false;
+  S.settings.localDefault = false;
   S.settings.localSelected = false;
   S.pendingLocalSelect = false;
   saveSettings();
@@ -462,7 +469,7 @@ function localRow() {
     el('button', {
       class: 'grow-btn',
       onclick: () => {
-        if (local.state === 'off' || local.state === 'error') { startLocal('announce'); openDevices(); }
+        if (local.state === 'off' || local.state === 'error') { S.settings.localDefault = true; startLocal('announce'); openDevices(); }
         else if (mine && mine.state !== 'unavailable') { selectPlayer(mine.entity_id); closeSheet(); }
         else S.pendingLocalSelect = 'announce';
       },
@@ -655,7 +662,7 @@ function renderNow() {
       : p.state === 'off' ? `${playerName(p)} ist aus`
         : p.state === 'unavailable' ? `${playerName(p)} ist nicht erreichbar`
           : 'Nichts in der Wiedergabe';
-  $('#nowArtist').textContent = hasMedia ? (a.media_artist || '') : (!p ? '' : 'Such dir unter „Start“, „Suche“ oder „Bibliothek“ etwas aus.');
+  $('#nowArtist').textContent = hasMedia ? (a.media_artist || '') : (!p ? '' : 'Such dir unter „Startseite“, „Mediathek“ oder „Suchen“ etwas aus.');
   $('#nowAlbum').textContent = hasMedia ? (a.media_album_name || '') : '';
   const pic = hasMedia || active ? playerPicture(p) : null;
   setImg($('#nowArt'), $('#nowArtPh'), pic);
@@ -935,11 +942,43 @@ function greeting() {
   return h < 5 ? 'Gute Nacht' : h < 11 ? 'Guten Morgen' : h < 18 ? 'Guten Tag' : 'Guten Abend';
 }
 
-function quickNode(item) {
-  return el('button', { class: 'quick', onclick: () => onItemClick(item) },
-    artNode(item.image, item.media_type, 'quick-art'),
-    el('span', { class: 'quick-name' }, item.name),
+function heroNode(item) {
+  return el('button', { class: 'hero', onclick: () => onItemClick(item) },
+    el('span', { class: 'hero-over' }, TYPE_LABEL[item.media_type] || ''),
+    el('span', { class: 'hero-title' }, item.name),
+    artNode(item.image, item.media_type, 'hero-art'),
   );
+}
+
+const shelfHead = (title, onClick) => el('button', { class: 'shelf-head shelf-more', onclick: onClick },
+  el('h2', { class: 'shelf-title' }, title), icon('forward'));
+
+// ---------- Ansicht: Radio ----------
+async function loadRadio() {
+  const box = $('#radio');
+  if (!S.conn?.open) return;
+  if (!S.configEntryId) { box.replaceChildren(noConfigEntryNode()); return; }
+  const req = ++S.radio.req;
+  S.radio.loaded = true;
+  box.replaceChildren(el('div', { class: 'more' }, el('div', { class: 'spinner', 'aria-label': 'Lädt' })));
+  try {
+    const items = await fetchLibrary({ media_type: 'radio', order_by: 'name', limit: 200 });
+    if (req !== S.radio.req) return;
+    const favs = items.filter((i) => i.favorite);
+    const nodes = [];
+    if (favs.length) nodes.push(el('h2', { class: 'shelf-title plain' }, 'Favoriten'), el('div', { class: 'grid' }, favs.map(cardNode)));
+    if (items.length) nodes.push(el('h2', { class: 'shelf-title plain' }, 'Deine Sender'), el('div', { class: 'grid' }, items.map(cardNode)));
+    else nodes.push(el('p', { class: 'empty' }, 'Noch keine Radiosender in deiner Mediathek.'));
+    nodes.push(el('div', { class: 'more' }, el('button', {
+      class: 'btn',
+      onclick: () => { S.search.type = 'radio'; renderSearchTypes(); setTab('search'); },
+    }, icon('search', 'small'), 'Weitere Sender suchen')));
+    box.replaceChildren(...nodes);
+  } catch (e) {
+    if (req !== S.radio.req) return;
+    S.radio.loaded = false;
+    box.replaceChildren(el('p', { class: 'empty' }, 'Sender konnten nicht geladen werden: ' + e.message));
+  }
 }
 
 async function loadHome() {
@@ -952,13 +991,11 @@ async function loadHome() {
   const nodes = [el('p', { class: 'greeting' }, greeting())];
   for (const sh of HOME_SHELVES) {
     const sec = el('section', { class: 'home-section', dataset: { shelf: sh.key } });
-    if (sh.quick) {
-      sec.append(el('div', { class: 'quick-grid' }, Array.from({ length: 4 }, () => el('div', { class: 'quick skeleton' }))));
+    if (sh.hero) {
+      sec.append(el('div', { class: 'hero-row' }, Array.from({ length: 2 }, () => el('div', { class: 'hero skeleton' }))));
     } else {
       sec.append(
-        el('div', { class: 'shelf-head' },
-          el('h2', { class: 'shelf-title' }, sh.title),
-          el('button', { class: 'shelf-more', onclick: () => showInLibrary(sh.type, sh.order) }, 'Alle anzeigen')),
+        shelfHead(sh.title, () => (sh.type === 'radio' ? setTab('radio') : showInLibrary(sh.type, sh.order))),
         el('div', { class: 'shelf' }, Array.from({ length: 5 }, () => el('div', { class: 'card' }, el('div', { class: 'card-art skeleton' })))),
       );
     }
@@ -975,11 +1012,11 @@ async function loadHome() {
     const sec = sections[sh.key];
     if (!items.length) { sec.remove(); return; }
     filled++;
-    if (sh.quick) sec.replaceChildren(el('div', { class: 'quick-grid' }, items.map(quickNode)));
+    if (sh.hero) sec.replaceChildren(el('div', { class: 'hero-row' }, items.map(heroNode)));
     else sec.lastElementChild.replaceChildren(...items.map(cardNode));
   }));
   if (req === S.home.req && !filled) {
-    box.append(el('p', { class: 'empty' }, 'Deine Bibliothek ist noch leer. Über „Suche“ findest du Musik bei deinen Musikdiensten.'));
+    box.append(el('p', { class: 'empty' }, 'Deine Mediathek ist noch leer. Über „Suchen“ findest du Musik bei deinen Musikdiensten.'));
   }
 }
 
@@ -1036,7 +1073,7 @@ async function loadLibrary(reset) {
     }
     container.append(...items.map((i) => (asList ? rowNode(i) : cardNode(i))));
     if (!L.items.length) {
-      list.replaceChildren(el('p', { class: 'empty' }, L.filter || L.fav ? 'Nichts gefunden.' : 'Hier ist noch nichts in deiner Bibliothek.'));
+      list.replaceChildren(el('p', { class: 'empty' }, L.filter || L.fav ? 'Nichts gefunden.' : 'Hier ist noch nichts in deiner Mediathek.'));
     }
   } catch (e) {
     if (req !== L.req) return;
@@ -1066,7 +1103,7 @@ function renderSearchTypes() {
     el('button', {
       class: 'chip', 'aria-pressed': String(S.search.libraryOnly),
       onclick: () => { S.search.libraryOnly = !S.search.libraryOnly; renderSearchTypes(); runSearch(); },
-    }, 'Nur Bibliothek'),
+    }, 'Nur Mediathek'),
   );
 }
 
@@ -1077,7 +1114,7 @@ async function runSearch() {
   s.q = q;
   const req = ++s.req;
   if (q.length < 2) {
-    box.replaceChildren(el('p', { class: 'empty' }, 'Suche in deiner Bibliothek und bei deinen Musikdiensten.'));
+    box.replaceChildren(el('p', { class: 'empty' }, 'Suche in deiner Mediathek und bei deinen Musikdiensten.'));
     return;
   }
   if (!S.configEntryId) { box.replaceChildren(noConfigEntryNode()); return; }
@@ -1176,6 +1213,7 @@ function setTab(tab) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
   showView();
   if (tab === 'home' && (again || !S.home.loaded)) loadHome();
+  if (tab === 'radio' && (again || !S.radio.loaded)) loadRadio();
   if (tab === 'library' && !S.lib.items.length && !S.lib.loading) loadLibrary(true);
   if (tab === 'search') {
     if (!$('#searchResults').childElementCount) runSearch();
@@ -1187,6 +1225,7 @@ function setTab(tab) {
 function showView() {
   const inDetail = S.stack.length > 0;
   $('#view-home').hidden = inDetail || S.tab !== 'home';
+  $('#view-radio').hidden = inDetail || S.tab !== 'radio';
   $('#view-library').hidden = inDetail || S.tab !== 'library';
   $('#view-search').hidden = inDetail || S.tab !== 'search';
   $('#view-detail').hidden = !inDetail;
@@ -1262,6 +1301,8 @@ function openSettings() {
   const hostInput = el('input', { type: 'text', value: S.settings.maHost || '', placeholder: [...S.maHosts][0] ? `automatisch: ${[...S.maHosts][0]}` : 'z. B. 192.168.1.20', spellcheck: 'false' });
   const showAll = el('input', { type: 'checkbox' });
   showAll.checked = !!S.settings.showUnavailable;
+  const localDefault = el('input', { type: 'checkbox' });
+  localDefault.checked = S.settings.localDefault !== false;
   const localStatus = local.state === 'connected' ? `verbunden (${local.route})`
     : local.state === 'connecting' ? 'verbindet …'
       : local.state === 'error' ? 'Fehler' : 'aus';
@@ -1277,6 +1318,7 @@ function openSettings() {
     hostInput,
     el('label', {}, 'Music-Assistant-Integration (Config-Entry-ID, nur falls nicht automatisch erkannt)'),
     entryInput,
+    el('label', { class: 'check' }, localDefault, 'Beim Start immer dieses Gerät als Wiedergabegerät wählen'),
     el('label', { class: 'check' }, showAll, 'Nicht erreichbare Player anzeigen'),
     el('button', {
       class: 'btn primary wide',
@@ -1288,6 +1330,8 @@ function openSettings() {
         S.settings.maHost = newHost;
         S.settings.configEntryId = entryInput.value.trim() || undefined;
         S.settings.showUnavailable = showAll.checked;
+        const turnOn = localDefault.checked && S.settings.localDefault === false;
+        S.settings.localDefault = localDefault.checked;
         saveSettings();
         if (S.settings.configEntryId) S.configEntryId = S.settings.configEntryId;
         closeSheet();
@@ -1295,7 +1339,8 @@ function openSettings() {
         S.lib.items = [];
         if (S.tab === 'library') loadLibrary(true);
         if (!S.settings.configEntryId && S.conn) findConfigEntry(S.conn).then((id) => { S.configEntryId = id; });
-        if (localChanged && S.settings.localEnabled) startLocal(false);
+        if (turnOn && !local.active) startLocal('select');
+        else if (localChanged && S.settings.localEnabled) startLocal(false);
       },
     }, 'Speichern'),
     el('button', {
@@ -1308,6 +1353,7 @@ function openSettings() {
         if (S.conn) { S.conn.close(); S.conn = null; }
         await logout(a);
         S.home.loaded = false;
+        S.radio.loaded = false;
         showLogin();
       },
     }, icon('logout', 'small'), 'Abmelden'),

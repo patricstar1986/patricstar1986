@@ -11,6 +11,7 @@ const shotsIdx = process.argv.indexOf('--shots');
 const SHOTS = shotsIdx > 0 ? process.argv[shotsIdx + 1] : null;
 
 const mock = await startMock({ port: 0, quiet: true });
+mock.state.admin = false; // zunächst ohne Admin-Rechte: „Dieses Gerät“ kann sich nicht von selbst verbinden
 const APP = `${mock.url}/local/musik/index.html`;
 const browser = await chromium.launch();
 const errors = [];
@@ -69,13 +70,13 @@ await test('Anmeldung über die Home-Assistant-Anmeldeseite', async () => {
   assert.ok(!page.url().includes('code='), 'Code aus der Adresse entfernt');
 });
 
-await test('Startseite: Schnellzugriff, Reihen und Mini-Player', async () => {
-  await page.waitForFunction(() => document.querySelectorAll('#home .quick:not(.skeleton)').length === 8);
+await test('Startseite: große Kacheln, Reihen und Mini-Player', async () => {
+  await page.waitForFunction(() => document.querySelectorAll('#home .hero:not(.skeleton)').length === 8);
   await page.waitForFunction(() => !document.querySelector('#home .skeleton'));
   const titles = await page.$$eval('#home .shelf-title', (h) => h.map((x) => x.textContent));
-  assert.deepEqual(titles, ['Zuletzt gehört', 'Neu in deiner Bibliothek', 'Künstler aus deiner Bibliothek', 'Radiosender', 'Wiederentdecken']);
-  assert.match(await page.textContent('#home .greeting'), /^Gute/);
-  assert.equal(await page.textContent('#pageTitle'), 'Start');
+  assert.deepEqual(titles, ['Zuletzt gehört', 'Neu in deiner Mediathek', 'Künstler aus deiner Mediathek', 'Radiosender', 'Wiederentdecken']);
+  assert.equal(await page.textContent('#home .hero .hero-over'), 'Playlist');
+  assert.equal(await page.textContent('#pageTitle'), 'Startseite');
   assert.equal(await page.textContent('#deviceName'), 'AMBEO Soundbar Plus', 'spielender Player automatisch gewählt');
   await page.waitForSelector('#mini:not([hidden])');
   assert.equal(await page.textContent('#miniTitle'), "I'm on Your Side");
@@ -173,7 +174,6 @@ await test('Lautsprecher gruppieren und wieder lösen', async () => {
 });
 
 await test('Dieses Gerät: ohne Admin-Rechte verständliche Meldung', async () => {
-  mock.state.admin = false;
   await page.click('#deviceBtn');
   await page.click('#localRow .grow-btn');
   await page.waitForSelector('#sheetBody .hint.error');
@@ -213,9 +213,20 @@ await test('Dieses Gerät: als Lautsprecher anmelden und Musik darauf starten', 
   await page.keyboard.press('Escape');
 });
 
+await test('Radio: eigener Bereich mit den Sendern der Mediathek', async () => {
+  await page.click('.tab[data-tab=radio]');
+  assert.equal(await page.textContent('#pageTitle'), 'Radio');
+  await page.waitForSelector('#radio .card:has-text("Antenne Vorarlberg")');
+  assert.equal(await page.$$eval('#radio .card', (c) => c.length), 2);
+  await page.click('#radio .btn');
+  await page.waitForSelector('#view-search:not([hidden])');
+  assert.equal(await page.textContent('#searchTypes .chip.active'), 'Radio');
+  await page.click('#searchTypes .chip:has-text("Alles")');
+});
+
 await test('Bibliothek: Playlists laden, nachladen, kaputte Bilder, Favoriten', async () => {
   await page.click('.tab[data-tab=library]');
-  assert.equal(await page.textContent('#pageTitle'), 'Bibliothek');
+  assert.equal(await page.textContent('#pageTitle'), 'Mediathek');
   await page.waitForFunction(() => document.querySelectorAll('#libList .card').length === 50);
   await page.locator('#libMore').scrollIntoViewIfNeeded();
   await page.waitForFunction(() => document.querySelectorAll('#libList .card').length === 60);
@@ -297,8 +308,8 @@ await test('Verbindung bricht ab und wird wiederhergestellt', async () => {
   await page.click('#deviceBtn');
   await page.click('#sheetBody .sheet-item[data-entity="media_player.bravia"] .grow-btn');
   await page.click('.tab[data-tab=home]');
-  await page.waitForSelector('#home .quick:not(.skeleton)');
-  await page.click('#home .quick');
+  await page.waitForSelector('#home .hero:not(.skeleton)');
+  await page.click('#home .hero');
   await page.waitForSelector('#detail .detail-actions');
 });
 
@@ -319,6 +330,26 @@ await test('Abmelden, falsches Token, richtiges Token', async () => {
   await page.waitForSelector('#app:not([hidden])');
 });
 
+await test('Neues Gerät: „Dieses Gerät“ wird beim Start von selbst gewählt', async () => {
+  mock.state.admin = true;
+  const before = mock.state.sendspinClients.length;
+  const fresh = await newPage();
+  await fresh.goto(APP);
+  await fresh.click('.token-login summary');
+  await fresh.fill('#token', 'test-token');
+  await fresh.click('#tokenBtn');
+  await fresh.waitForFunction(() => document.querySelector('#deviceName').textContent === 'Dieses Gerät', null, { timeout: 15000 });
+  assert.equal(mock.state.sendspinClients.length, before + 1);
+  // bewusst ein anderes Gerät wählen und neu laden: Standard bleibt dieses Gerät
+  await fresh.click('#deviceBtn');
+  await fresh.click('#sheetBody .sheet-item[data-entity="media_player.kuche_2"] .grow-btn');
+  assert.equal(await fresh.textContent('#deviceName'), 'Küche');
+  await fresh.reload();
+  await fresh.waitForFunction(() => document.querySelector('#deviceName').textContent === 'Dieses Gerät', null, { timeout: 15000 });
+  await fresh.context().close();
+  mock.state.admin = false;
+});
+
 await test('iPhone: Bedienung passt auf den Bildschirm', async () => {
   // Ausgangslage wie am Anfang: AMBEO spielt
   await mock.state.calls.splice(0);
@@ -329,13 +360,13 @@ await test('iPhone: Bedienung passt auf den Bildschirm', async () => {
   s.state = 'playing';
   mock.state.queues[s.entity_id] = { items: 18, index: 4 };
 
-  const phone = await newPage({ ...devices['iPhone 13'] });
+  const phone = await newPage({ ...devices['iPhone 13'], colorScheme: 'dark' });
   await phone.goto(APP);
   await phone.click('.token-login summary');
   await phone.fill('#token', 'test-token');
   await phone.click('#tokenBtn');
   await phone.waitForSelector('#app:not([hidden])');
-  await phone.waitForFunction(() => !document.querySelector('#home .skeleton') && document.querySelectorAll('#home .quick').length === 8);
+  await phone.waitForFunction(() => !document.querySelector('#home .skeleton') && document.querySelectorAll('#home .hero').length === 8);
   await phone.waitForSelector('#mini:not([hidden])');
   const overflow = () => phone.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   assert.equal(await overflow(), 0);

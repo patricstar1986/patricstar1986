@@ -5,15 +5,16 @@ der in deinem Home Assistant eingebunden ist, und kannst die Musik auch **direkt
 oder PC hören**. Sie braucht keinen App Store und keinen Mac und läuft direkt aus deinem
 Home Assistant heraus.
 
-Der Aufbau folgt dem, was man von Musik-Apps kennt: unten **Start / Suche / Bibliothek**,
+Der Aufbau folgt dem, was man von Musik-Apps kennt: unten eine schwebende Leiste mit **Startseite / Radio / Mediathek / Suchen**,
 darüber der Mini-Player, und ein Tipp darauf öffnet die große Wiedergabe-Ansicht.
 
 ## Funktionen
 
-- **Start:** Schnellzugriff auf zuletzt gespielte Playlists, dazu Reihen wie „Zuletzt gehört“,
-  „Neu in deiner Bibliothek“, Künstler, Radiosender und „Wiederentdecken“.
-- **Suche** in der Bibliothek und bei deinen Musikdiensten, auf Wunsch nur in der Bibliothek.
-- **Bibliothek:** Playlists, Alben, Künstler, Titel, Radio, Podcasts und Hörbücher. Mit Filter,
+- **Startseite:** große Kacheln mit den zuletzt gespielten Playlists, dazu Reihen wie „Zuletzt gehört“,
+  „Neu in deiner Mediathek“, Künstler, Radiosender und „Wiederentdecken“.
+- **Radio:** eigener Bereich mit deinen Sendern.
+- **Suchen** in der Mediathek und bei deinen Musikdiensten, auf Wunsch nur in der Mediathek.
+- **Mediathek:** Playlists, Alben, Künstler, Titel, Radio, Podcasts und Hörbücher. Mit Filter,
   Sortierung und Favoriten. Alben und Playlists zeigen ihre Titel, Künstler ihre Alben.
 - **Wiedergabe-Ansicht:** Cover, Fortschritt (antippen zum Springen), Wiedergabe/Pause,
   Zurück/Weiter, Zufall, Wiederholen, Lautstärke und Stumm.
@@ -84,14 +85,19 @@ Home Assistant. Danach bist du in der App.
 
 ## Musik direkt am Handy oder PC hören („Dieses Gerät“)
 
-1. Oben rechts auf das Geräte-Feld tippen (oder im Mini-Player auf das Lautsprecher-Symbol).
-2. **„Dieses Gerät“** antippen. Die App meldet das Handy bei Music Assistant als Lautsprecher an.
-3. Beim **ersten Mal** dauert es etwa 20 Sekunden, bis Music Assistant das neue Gerät an
-   Home Assistant weitergegeben hat. Danach wählt die App es automatisch aus.
-4. Jetzt Musik aussuchen. Sie spielt auf dem Gerät, das du in der Hand hast.
+**Das ist der Standard:** Beim Start meldet die App das Gerät, auf dem sie läuft, bei Music
+Assistant als Lautsprecher an und wählt es als Wiedergabegerät. Du suchst Musik aus, und sie
+spielt auf dem Gerät, das du in der Hand hast.
 
-Die App merkt sich die Einstellung und verbindet das Gerät beim nächsten Öffnen von selbst.
-Mit **„Aus“** in der Geräteliste schaltest du es wieder ab.
+- Beim **ersten Mal** dauert es etwa 20 Sekunden, bis Music Assistant das neue Gerät an
+  Home Assistant weitergegeben hat. So lange ist noch ein anderer Lautsprecher gewählt.
+- Einen anderen Lautsprecher wählst du über das Geräte-Feld oben rechts. Beim nächsten Start
+  ist wieder dieses Gerät gewählt.
+- Mit **„Aus“** in der Geräteliste schaltest du das ab, auch für künftige Starts. Wieder
+  einschalten: „Dieses Gerät“ antippen oder in den Einstellungen (Zahnrad) den Haken bei
+  „Beim Start immer dieses Gerät als Wiedergabegerät wählen“ setzen.
+- Klappt die Verbindung nicht (z. B. ohne Admin-Konto über `https`), bleibt einfach ein
+  anderer Lautsprecher gewählt. Den Grund zeigt die Geräteliste unter „Dieses Gerät“.
 
 **So funktioniert es:** Music Assistant kann Geräte über das Protokoll „Sendspin“ als
 Lautsprecher einbinden (geprüft mit Version 2.10.9). Die App nutzt dafür dieselbe Bibliothek wie die
@@ -160,7 +166,7 @@ widerrufen.
 |---|---|
 | Seite nicht gefunden (404) | Liegen die Dateien in `/config/www/musik/`? Gab es `www` vorher nicht, Home Assistant neu starten. |
 | „Kein Music-Assistant-Player gefunden“ | Läuft der Music Assistant und ist die Integration unter *Einstellungen → Geräte & Dienste* geladen? |
-| Start/Bibliothek: „Integration wurde nicht gefunden“ | Die automatische Erkennung hat nicht geklappt (möglich z. B. bei Benutzern ohne Admin-Rechte). Dann die ID unter *Einstellungen (Zahnrad)* eintragen. Du findest sie in Home Assistant unter *Einstellungen → Geräte & Dienste → Music Assistant*, in der Browser-Adresse hinter `config_entry=`. |
+| Startseite/Mediathek: „Integration wurde nicht gefunden“ | Die automatische Erkennung hat nicht geklappt (möglich z. B. bei Benutzern ohne Admin-Rechte). Dann die ID unter *Einstellungen (Zahnrad)* eintragen. Du findest sie in Home Assistant unter *Einstellungen → Geräte & Dienste → Music Assistant*, in der Browser-Adresse hinter `config_entry=`. |
 | „Dieses Gerät“: Verbindung fehlgeschlagen | Die Meldung unter dem Eintrag nennt den Grund. Im Heimnetz die App über `http://` öffnen oder mit einem Admin-Konto anmelden. Hat Music Assistant eine andere Adresse als Home Assistant, diese in den Einstellungen eintragen. |
 | „Dieses Gerät“ ist verbunden, aber stumm | Einmal auf Wiedergabe tippen. Lautstärke des Geräts und den Stumm-Schalter am iPhone prüfen. |
 | Anmeldung in der Startbildschirm-App auf dem iPhone hängt | Mit Token anmelden (siehe oben). |
