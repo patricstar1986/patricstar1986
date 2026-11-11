@@ -1,6 +1,6 @@
 // Nachgebauter Home-Assistant-Server für Tests der Musik-App.
 // Liefert die App unter /local/musik/ aus und beantwortet die WebSocket-Befehle,
-// die die App nutzt, im selben Format wie Home Assistant 2026.11 mit Music Assistant.
+// die die App nutzt, im selben Format wie Home Assistant 2026.11 mit Music Assistant 2.10.
 //
 //   node mock-ha.mjs        → http://localhost:8123/local/musik/index.html
 import http from 'node:http';
@@ -16,8 +16,11 @@ const TYPES = {
 };
 export const TOKEN = 'test-token';
 const ENTRY_ID = '01TESTENTRY';
+const ADDON_SLUG = 'd5369777_music_assistant';
+const INGRESS_ENTRY = '/api/hassio_ingress/TESTINGRESSTOKEN';
+const MA_FEATURES = 8320575; // wie die echten Music-Assistant-Player (inkl. Gruppieren, ohne Ein/Aus)
 
-const img = (c) => `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="${c}"/></svg>`)}`;
+const img = (c, c2 = '#0003') => `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="${c}"/><circle cx="7" cy="7" r="5" fill="${c2}"/></svg>`)}`;
 
 function player(entity_id, name, state, extra = {}) {
   return {
@@ -25,43 +28,72 @@ function player(entity_id, name, state, extra = {}) {
     attributes: {
       group_members: [], volume_level: 0.2, is_volume_muted: false, app_id: 'music_assistant',
       mass_player_type: 'player', device_class: 'speaker', friendly_name: name,
-      supported_features: 8320575, shuffle: false, repeat: 'off', ...extra,
+      supported_features: MA_FEATURES, shuffle: false, repeat: 'off', ...extra,
     },
     last_changed: new Date().toISOString(), last_updated: new Date().toISOString(), context: { id: 'x' },
   };
 }
+
+const TRACK = { title: "I'm on Your Side", artist: 'The Glorious Sons', album: 'A War on Everything', id: 'apple_music://track/1474250738', duration: 225 };
+const NEXT_TRACK = { title: 'Move Along', artist: 'The All-American Rejects', album: 'Move Along (Deluxe Edition)', id: 'apple_music://track/6790495198', duration: 238 };
+
+const mediaAttrs = (t, position = 0) => ({
+  media_content_id: t.id, media_content_type: 'music', media_duration: t.duration, media_position: position,
+  media_position_updated_at: new Date().toISOString(), media_title: t.title, media_artist: t.artist, media_album_name: t.album,
+});
+const MEDIA_KEYS = ['media_content_id', 'media_content_type', 'media_duration', 'media_position', 'media_position_updated_at',
+  'media_title', 'media_artist', 'media_album_name', 'entity_picture_local'];
 
 export function createState() {
   return {
     states: {
       'media_player.kuche_2': player('media_player.kuche_2', 'Küche', 'idle'),
       'media_player.ambeo_soundbar_plus_cast': player('media_player.ambeo_soundbar_plus_cast', 'AMBEO Soundbar Plus', 'playing', {
-        media_content_id: 'apple_music://track/1474250738', media_content_type: 'music',
-        media_duration: 225, media_position: 20, media_position_updated_at: new Date().toISOString(),
-        media_title: "I'm on Your Side", media_artist: 'The Glorious Sons', media_album_name: 'A War on Everything',
+        ...mediaAttrs(TRACK, 20),
         entity_picture_local: '/api/media_player_proxy/media_player.ambeo_soundbar_plus_cast?token=abc',
         shuffle: true, volume_level: 0.1,
       }),
+      'media_player.bravia': player('media_player.bravia', 'BRAVIA', 'off', { supported_features: 8320959 }),
       'media_player.werkstatt_apple_tv': { entity_id: 'media_player.werkstatt_apple_tv', state: 'unavailable', attributes: { friendly_name: 'Werkstatt Apple TV', supported_features: 0 } },
       'media_player.wohnzimmer_wohnzimmer': { entity_id: 'media_player.wohnzimmer_wohnzimmer', state: 'off', attributes: { friendly_name: 'Wohnzimmer (Apple TV)', supported_features: 450487 } },
       'light.kueche': { entity_id: 'light.kueche', state: 'on', attributes: {} },
     },
+    queues: { 'media_player.ambeo_soundbar_plus_cast': { items: 18, index: 4 } },
     calls: [],
+    admin: true,
+    ingressSessions: new Set(),
+    sendspinClients: [],
   };
 }
 
+const ALBUMS = [
+  ['4356', '1000 Jahre EAV (Lieblingslieder aus 1000 Jahre EAV)', 'EAV', '4107', '#a5a'],
+  ['5905', 'Classic Queen', 'Queen', '2975', null],
+  ['11607', 'Zeit für Optimisten - EP', 'Silbermond', '3329', '#27a'],
+  ['11606', 'Best of De Randfichten', 'De Randfichten', '864', '#7a2'],
+  ['394', 'Innuendo', 'Queen', '2975', '#246'],
+  ['3431', 'Tommy', 'The Who', '3909', '#a62'],
+  ['2159', 'Rid of Me', 'PJ Harvey', '2917', '#933'],
+];
 const LIB = {
   playlist: Array.from({ length: 60 }, (_, i) => ({
     media_type: 'playlist', uri: `library://playlist/${i + 1}`, name: `Playlist ${String(i + 1).padStart(2, '0')}`,
     version: '', image: i % 7 === 3 ? 'http://127.0.0.1:1/broken.jpg' : img(['#c33', '#3c3', '#33c', '#cc3'][i % 4]), favorite: i % 5 === 0, explicit: null,
   })),
-  album: [
-    { media_type: 'album', uri: 'library://album/4356', name: '1000 Jahre EAV (Lieblingslieder aus 1000 Jahre EAV)', version: '', image: img('#a5a'), favorite: false, artists: [{ media_type: 'artist', uri: 'library://artist/4107', name: 'EAV' }] },
-    { media_type: 'album', uri: 'library://album/5905', name: 'Classic Queen', version: '', image: null, favorite: true, artists: [{ media_type: 'artist', uri: 'library://artist/2975', name: 'Queen' }] },
+  album: ALBUMS.map(([id, name, artist, artistId, color], i) => ({
+    media_type: 'album', uri: `library://album/${id}`, name, version: '', image: color ? img(color) : null, favorite: i === 1,
+    artists: [{ media_type: 'artist', uri: `library://artist/${artistId}`, name: artist }],
+  })),
+  artist: [
+    { media_type: 'artist', uri: 'library://artist/2975', name: 'Queen', version: '', image: img('#555', '#fff3'), favorite: false },
+    { media_type: 'artist', uri: 'library://artist/4107', name: 'EAV', version: '', image: null, favorite: false },
+    { media_type: 'artist', uri: 'library://artist/3329', name: 'Silbermond', version: '', image: img('#27a', '#fff3'), favorite: false },
   ],
-  artist: [{ media_type: 'artist', uri: 'library://artist/2975', name: 'Queen', version: '', image: img('#555'), favorite: false }],
   track: [{ media_type: 'track', uri: 'library://track/18335', name: '50ft Queenie', version: '', image: img('#933'), favorite: false, artists: [{ name: 'PJ Harvey' }], album: { name: 'Rid of Me' } }],
-  radio: [{ media_type: 'radio', uri: 'tunein://radio/s44910', name: "Queen's Radio", version: '', image: img('#393'), favorite: false }],
+  radio: [
+    { media_type: 'radio', uri: 'tunein://radio/s44910', name: "Queen's Radio", version: '', image: img('#393'), favorite: false },
+    { media_type: 'radio', uri: 'tunein://radio/s1', name: 'Antenne Vorarlberg', version: '', image: img('#d60'), favorite: false },
+  ],
   podcast: [], audiobook: [],
 };
 
@@ -84,65 +116,136 @@ function browse(id) {
   };
 }
 
+const queueItem = (t) => ({
+  queue_item_id: 'q' + t.id, name: `${t.artist} - ${t.title}`, duration: t.duration,
+  media_item: {
+    media_type: 'track', uri: t.id, name: t.title, version: '', image: img('#e83', '#fff'), favorite: false, explicit: null,
+    artists: [{ media_type: 'artist', uri: 'x://artist/1', name: t.artist, version: '', image: null }],
+    album: { media_type: 'album', uri: 'x://album/1', name: t.album, version: '', image: null },
+  },
+  stream_title: null,
+});
+
 export function startMock({ port = 8123, quiet = false } = {}) {
   const st = createState();
   const sockets = new Set();
   const log = (...a) => { if (!quiet) console.log(...a); };
 
   function emitState(id) {
-    const ev = { event_type: 'state_changed', data: { entity_id: id, new_state: st.states[id] } };
+    const ev = { event_type: 'state_changed', data: { entity_id: id, new_state: st.states[id] || null } };
     for (const s of sockets) for (const subId of s.subs) s.ws.send(JSON.stringify({ id: subId, type: 'event', event: ev }));
   }
+  const emitSoon = (...ids) => setTimeout(() => ids.forEach(emitState), 30);
 
   function handleService(msg) {
     const { domain, service, service_data: d = {}, target } = msg;
     st.calls.push({ domain, service, data: d, target });
     log('call_service', domain, service, JSON.stringify(d), JSON.stringify(target || {}));
-    if (domain === 'music_assistant' && service === 'get_library') {
-      let items = LIB[d.media_type] || [];
-      if (d.favorite) items = items.filter((x) => x.favorite);
-      if (d.search) items = items.filter((x) => x.name.toLowerCase().includes(d.search.toLowerCase()));
-      const offset = d.offset || 0, limit = d.limit || 25;
-      return { response: { items: items.slice(offset, offset + limit), limit, offset, order_by: d.order_by || 'name', media_type: d.media_type } };
-    }
-    if (domain === 'music_assistant' && service === 'search') {
-      const q = d.name.toLowerCase();
-      const f = (arr) => arr.filter((x) => x.name.toLowerCase().includes(q));
-      const want = (t) => !d.media_type || d.media_type.includes(t);
-      return {
-        response: {
+    const id = target?.entity_id;
+    const p = st.states[id];
+    if (domain === 'music_assistant') {
+      if (service === 'get_library') {
+        let items = [...(LIB[d.media_type] || [])];
+        if (d.favorite) items = items.filter((x) => x.favorite);
+        if (d.search) items = items.filter((x) => x.name.toLowerCase().includes(d.search.toLowerCase()));
+        if (d.order_by && d.order_by !== 'name') items.reverse();
+        const offset = d.offset || 0, limit = d.limit || 25;
+        return { items: items.slice(offset, offset + limit), limit, offset, order_by: d.order_by || 'name', media_type: d.media_type };
+      }
+      if (service === 'search') {
+        const q = d.name.toLowerCase();
+        const f = (arr) => arr.filter((x) => x.name.toLowerCase().includes(q));
+        const want = (t) => !d.media_type || d.media_type.includes(t);
+        return {
           artists: want('artist') ? f(LIB.artist) : [], albums: want('album') ? f(LIB.album) : [],
           tracks: want('track') ? f(LIB.track) : [], playlists: want('playlist') ? f(LIB.playlist).slice(0, d.limit || 5) : [],
           radio: want('radio') ? f(LIB.radio) : [], audiobooks: [], podcasts: [],
-        },
-      };
-    }
-    const id = target?.entity_id;
-    const p = st.states[id];
-    if (domain === 'music_assistant' && service === 'play_media' && p) {
-      Object.assign(p.attributes, { media_title: `Gespielt: ${d.media_id}`, media_artist: 'Test', media_duration: 200, media_position: 0, media_position_updated_at: new Date().toISOString() });
-      p.state = 'playing';
-      emitState(id);
-      return { response: null };
+        };
+      }
+      if (service === 'get_queue' && p) {
+        const q = st.queues[id];
+        const a = p.attributes;
+        return {
+          [id]: {
+            queue_id: 'up' + id.length, active: !!q, name: a.friendly_name, items: q?.items || 0, shuffle_enabled: !!a.shuffle,
+            repeat_mode: a.repeat || 'off', current_index: q ? q.index : null, elapsed_time: 20,
+            current_item: q ? queueItem({ ...TRACK, title: a.media_title || TRACK.title }) : null,
+            next_item: q && q.items > 1 ? queueItem(NEXT_TRACK) : null,
+          },
+        };
+      }
+      if (service === 'play_media' && p) {
+        Object.assign(p.attributes, mediaAttrs({ id: String(d.media_id), title: `Gespielt: ${d.media_id}`, artist: 'Test', album: '', duration: 200 }),
+          { entity_picture_local: `/api/media_player_proxy/${id}?token=abc` });
+        p.state = 'playing';
+        st.queues[id] = { items: 12, index: 0 };
+        emitSoon(id);
+        return null;
+      }
+      if (service === 'transfer_queue' && p) {
+        const src = st.states[d.source_player];
+        if (src) {
+          for (const k of MEDIA_KEYS) { if (k in src.attributes) p.attributes[k] = src.attributes[k]; delete src.attributes[k]; }
+          p.attributes.entity_picture_local = `/api/media_player_proxy/${id}?token=abc`;
+          st.queues[id] = st.queues[d.source_player]; delete st.queues[d.source_player];
+          src.state = 'idle';
+          p.state = d.auto_play ? 'playing' : 'paused';
+          emitSoon(d.source_player, id);
+        }
+        return null;
+      }
+      return null;
     }
     if (domain === 'media_player' && p) {
       const a = p.attributes;
+      const changed = [id];
       switch (service) {
         case 'media_pause': p.state = 'paused'; break;
         case 'media_play': p.state = 'playing'; break;
+        case 'media_stop': p.state = 'idle'; break;
         case 'volume_set': a.volume_level = d.volume_level; break;
         case 'volume_mute': a.is_volume_muted = d.is_volume_muted; break;
         case 'shuffle_set': a.shuffle = d.shuffle; break;
         case 'repeat_set': a.repeat = d.repeat; break;
         case 'media_seek': a.media_position = d.seek_position; a.media_position_updated_at = new Date().toISOString(); break;
-        case 'media_next_track': a.media_title = 'Nächster Titel'; break;
+        case 'media_next_track': Object.assign(a, mediaAttrs(NEXT_TRACK)); if (st.queues[id]) st.queues[id].index++; break;
+        case 'clear_playlist': for (const k of MEDIA_KEYS) delete a[k]; delete st.queues[id]; p.state = 'idle'; break;
         case 'turn_off': p.state = 'off'; break;
         case 'turn_on': p.state = 'idle'; break;
+        case 'join': {
+          const members = [...new Set([id, ...(a.group_members || []), ...(d.group_members || [])])];
+          for (const m of members) if (st.states[m]) { st.states[m].attributes.group_members = members; changed.push(m); }
+          break;
+        }
+        case 'unjoin': {
+          const members = (a.group_members || []).filter((m) => m !== id);
+          const rest = members.length > 1 ? members : [];
+          for (const m of members) if (st.states[m]) { st.states[m].attributes.group_members = rest; changed.push(m); }
+          a.group_members = [];
+          break;
+        }
         default: break;
       }
-      setTimeout(() => emitState(id), 30);
+      emitSoon(...new Set(changed));
     }
-    return { response: null };
+    return null;
+  }
+
+  function supervisor(msg) {
+    if (!st.admin) return { error: ['unauthorized', 'Unauthorized'] };
+    const { endpoint, method = 'get', data } = msg;
+    st.calls.push({ supervisor: endpoint, method });
+    if (endpoint === '/addons') return { result: { addons: [{ name: 'Mosquitto broker', slug: 'core_mosquitto', state: 'started' }, { name: 'Music Assistant', slug: ADDON_SLUG, state: 'started' }] } };
+    if (endpoint === `/addons/${ADDON_SLUG}/info`) return { result: { slug: ADDON_SLUG, ingress: true, ingress_entry: INGRESS_ENTRY, ingress_port: 8094, host_network: true, state: 'started', version: '2.10.9' } };
+    if (endpoint === '/ingress/session' && method === 'post') {
+      const session = 'sess' + (st.ingressSessions.size + 1);
+      st.ingressSessions.add(session);
+      return { result: { session } };
+    }
+    if (endpoint === '/ingress/validate_session' && method === 'post') {
+      return st.ingressSessions.has(data?.session) ? { result: {} } : { error: ['unknown_error', 'Session invalid'] };
+    }
+    return { error: ['not_found', 'Unknown endpoint'] };
   }
 
   const server = http.createServer((req, res) => {
@@ -188,7 +291,8 @@ export function startMock({ port = 8123, quiet = false } = {}) {
     res.writeHead(404); res.end('not found');
   });
 
-  const wss = new WebSocketServer({ server, path: '/api/websocket' });
+  // --- WebSocket: Home-Assistant-API ---
+  const wss = new WebSocketServer({ noServer: true });
   wss.on('connection', (ws) => {
     const sock = { ws, subs: new Set(), authed: false };
     sockets.add(sock);
@@ -210,34 +314,74 @@ export function startMock({ port = 8123, quiet = false } = {}) {
         case 'config/entity_registry/list_for_display':
           return reply({
             entity_categories: { 0: 'config', 1: 'diagnostic' },
-            entities: [
-              { ei: 'media_player.kuche_2', pl: 'music_assistant' },
-              { ei: 'media_player.ambeo_soundbar_plus_cast', pl: 'music_assistant' },
-              { ei: 'media_player.werkstatt_apple_tv', pl: 'music_assistant' },
-              { ei: 'media_player.wohnzimmer_wohnzimmer', pl: 'apple_tv' },
-              { ei: 'light.kueche', pl: 'hue' },
-            ],
+            entities: Object.keys(st.states).map((ei) => ({
+              ei, pl: ei.startsWith('light.') ? 'hue' : ei === 'media_player.wohnzimmer_wohnzimmer' ? 'apple_tv' : 'music_assistant',
+            })),
           });
         case 'config_entries/get': return reply([{ entry_id: ENTRY_ID, domain: 'music_assistant', state: 'loaded', title: 'Music Assistant' }]);
         case 'media_player/browse_media': return reply(browse(msg.media_content_id));
+        case 'supervisor/api': {
+          const r = supervisor(msg);
+          return r.error ? fail(...r.error) : reply(r.result);
+        }
         case 'call_service': {
           if (msg.domain === 'music_assistant' && ['get_library', 'search'].includes(msg.service) && msg.service_data?.config_entry_id !== ENTRY_ID) {
             return fail('service_validation_error', 'Config entry not found');
           }
-          const r = handleService(msg);
-          return reply({ context: { id: 'ctx' }, ...(msg.return_response ? { response: r.response } : {}) });
+          const response = handleService(msg);
+          return reply({ context: { id: 'ctx' }, ...(msg.return_response ? { response } : {}) });
         }
         default: return fail('unknown_command', 'Unknown command.');
       }
     });
   });
 
+  // --- WebSocket: Sendspin über Ingress (Music Assistant als Abspielziel für „Dieses Gerät“) ---
+  // Die Tests ersetzen die echte Sendspin-Bibliothek durch eine Attrappe, die hier nur ihren Namen meldet.
+  // Wie Music Assistant erscheint das Gerät danach als neuer media_player in Home Assistant.
+  const sendspin = new WebSocketServer({ noServer: true });
+  sendspin.on('connection', (ws) => {
+    let entityId = null;
+    ws.on('message', (raw) => {
+      let msg; try { msg = JSON.parse(raw); } catch { return; }
+      if (msg.type !== 'hello') return;
+      st.sendspinClients.push(msg.name);
+      entityId = 'media_player.' + msg.name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      setTimeout(() => {
+        if (ws.readyState !== ws.OPEN) return;
+        st.states[entityId] = player(entityId, msg.name, 'idle', { volume_level: 1 });
+        emitState(entityId);
+      }, 250);
+    });
+    ws.on('close', () => {
+      if (entityId && st.states[entityId]) { st.states[entityId].state = 'unavailable'; emitState(entityId); }
+    });
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    const url = new URL(req.url, `http://${req.headers.host}`);
+    if (url.pathname === '/api/websocket') return wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
+    if (url.pathname === `${INGRESS_ENTRY}/sendspin`) {
+      const session = /(?:^|;\s*)ingress_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
+      if (st.ingressSessions.has(session)) return sendspin.handleUpgrade(req, socket, head, (ws) => sendspin.emit('connection', ws, req));
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    } else {
+      socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
+    }
+    socket.destroy();
+  });
+
   return new Promise((resolve) => server.listen(port, '127.0.0.1', () => {
     resolve({
       url: `http://localhost:${server.address().port}`,
       state: st,
+      emitState,
       dropConnections: () => { for (const s of sockets) s.ws.terminate(); },
-      close: () => new Promise((r) => { for (const s of sockets) s.ws.terminate(); wss.close(); server.close(r); }),
+      close: () => new Promise((r) => {
+        for (const s of sockets) s.ws.terminate();
+        for (const c of sendspin.clients) c.terminate();
+        wss.close(); sendspin.close(); server.close(r);
+      }),
     });
   }));
 }
@@ -245,4 +389,5 @@ export function startMock({ port = 8123, quiet = false } = {}) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const m = await startMock({ port: Number(process.env.PORT) || 8123 });
   console.log(`Test-Home-Assistant läuft: ${m.url}/local/musik/index.html  (Token: ${TOKEN})`);
+  console.log('Hinweis: „Dieses Gerät“ braucht einen echten Music Assistant und funktioniert mit diesem Test-Server nicht.');
 }

@@ -1,36 +1,42 @@
 # Musik – App für Music Assistant (über Home Assistant)
 
-Eine Web-App (PWA) für **iPhone, iPad und Windows**, mit der du den Music Assistant
-steuerst, der in deinem Home Assistant eingebunden ist. Sie braucht keinen App Store und
-keinen Mac und läuft direkt aus deinem Home Assistant heraus.
+Eine Web-App (PWA) für **iPhone, iPad und Windows**. Du steuerst damit den Music Assistant,
+der in deinem Home Assistant eingebunden ist, und kannst die Musik auch **direkt am Handy
+oder PC hören**. Sie braucht keinen App Store und keinen Mac und läuft direkt aus deinem
+Home Assistant heraus.
 
-**Funktionen**
+Der Aufbau folgt dem, was man von Musik-Apps kennt: unten **Start / Suche / Bibliothek**,
+darüber der Mini-Player, und ein Tipp darauf öffnet die große Wiedergabe-Ansicht.
 
-- **Läuft gerade:** Cover, Titel, Fortschritt (antippen zum Springen), Wiedergabe/Pause,
-  Zurück/Weiter, Zufall, Wiederholen, Lautstärke, Stumm und Ein/Aus (nur bei Playern, die das können)
-- **Player wählen:** Es werden nur die Music-Assistant-Player angezeigt. Die App wählt
-  automatisch den, der gerade spielt.
-- **Bibliothek:** Playlists, Alben, Künstler, Titel, Radio, Podcasts und Hörbücher. Mit
-  Filter, Sortierung und Favoriten. Alben und Playlists zeigen ihre Titel, Künstler ihre Alben.
-- **Suche** in der Bibliothek und bei deinen Musikdiensten, auf Wunsch nur in der Bibliothek
+## Funktionen
+
+- **Start:** Schnellzugriff auf zuletzt gespielte Playlists, dazu Reihen wie „Zuletzt gehört“,
+  „Neu in deiner Bibliothek“, Künstler, Radiosender und „Wiederentdecken“.
+- **Suche** in der Bibliothek und bei deinen Musikdiensten, auf Wunsch nur in der Bibliothek.
+- **Bibliothek:** Playlists, Alben, Künstler, Titel, Radio, Podcasts und Hörbücher. Mit Filter,
+  Sortierung und Favoriten. Alben und Playlists zeigen ihre Titel, Künstler ihre Alben.
+- **Wiedergabe-Ansicht:** Cover, Fortschritt (antippen zum Springen), Wiedergabe/Pause,
+  Zurück/Weiter, Zufall, Wiederholen, Lautstärke und Stumm.
+- **Geräte:** Lautsprecher wählen, laufende Musik auf ein anderes Gerät mitnehmen,
+  mehrere Lautsprecher **gruppieren** (mit Lautstärke je Raum).
+- **Dieses Gerät:** Das Handy bzw. der PC wird selbst zum Lautsprecher (siehe unten).
+- **Warteschlange:** aktueller und nächster Titel, Anzahl der Titel, Zufall, Leeren.
 - **Abspielen-Optionen** (⋮): Jetzt abspielen, Warteschlange ersetzen, Als Nächstes,
-  Zur Warteschlange hinzufügen, Radio-Modus
+  Zur Warteschlange hinzufügen, Radio starten.
 - Die Verbindung wird automatisch wiederhergestellt, z. B. nach dem Entsperren des iPhones.
 - Die App passt sich dem hellen bzw. dunklen Modus des Geräts an.
 
-Die App spricht nur mit Home Assistant (WebSocket-API) und nutzt dessen Dienste
-`music_assistant.get_library`, `music_assistant.search`, `music_assistant.play_media` und
-`media_player.*`. Es werden keine Daten an andere Server geschickt. Ausnahme: Cover-Bilder,
-die der Music Assistant als Internet-Adresse liefert (z. B. von Apple Music), lädt das Gerät
-direkt von dort.
+Die App spricht nur mit deinem Home Assistant und deinem Music Assistant. Es werden keine
+Daten an andere Server geschickt. Ausnahme: Cover-Bilder, die der Music Assistant als
+Internet-Adresse liefert (z. B. von Apple Music), lädt das Gerät direkt von dort.
 
 ## Installation (ca. 5 Minuten)
 
 ### 1. Dateien nach Home Assistant kopieren
 
-Kopiere den **Inhalt** dieses Ordners `musik-app/` nach `/config/www/musik/` in Home Assistant.
-Dafür eignen sich z. B. die Apps (früher „Add-ons“) **Samba share**, **File editor** oder
-**Studio Code Server**.
+Kopiere den **Inhalt** dieses Ordners `musik-app/` (mit den Unterordnern `icons` und `vendor`)
+nach `/config/www/musik/` in Home Assistant. Dafür eignen sich z. B. die Apps (früher
+„Add-ons“) **Samba share**, **File editor** oder **Studio Code Server**.
 
 Danach sollte es so aussehen:
 
@@ -38,10 +44,12 @@ Danach sollte es so aussehen:
 /config/www/musik/index.html
 /config/www/musik/app.js
 /config/www/musik/ha.js
+/config/www/musik/local.js
 /config/www/musik/style.css
 /config/www/musik/sw.js
 /config/www/musik/manifest.webmanifest
 /config/www/musik/icons/…
+/config/www/musik/vendor/sendspin.js
 ```
 
 > Falls es den Ordner `/config/www` vorher **noch nicht gab**, musst du Home Assistant einmal
@@ -74,21 +82,69 @@ Home Assistant. Danach bist du in der App.
   `http://`-Adresse bieten manche Versionen nur „Verknüpfung erstellen“ an. Das funktioniert
   genauso, nur ohne Offline-Zwischenspeicher.
 
-### Von unterwegs
+## Musik direkt am Handy oder PC hören („Dieses Gerät“)
+
+1. Oben rechts auf das Geräte-Feld tippen (oder im Mini-Player auf das Lautsprecher-Symbol).
+2. **„Dieses Gerät“** antippen. Die App meldet das Handy bei Music Assistant als Lautsprecher an.
+3. Beim **ersten Mal** dauert es etwa 20 Sekunden, bis Music Assistant das neue Gerät an
+   Home Assistant weitergegeben hat. Danach wählt die App es automatisch aus.
+4. Jetzt Musik aussuchen. Sie spielt auf dem Gerät, das du in der Hand hast.
+
+Die App merkt sich die Einstellung und verbindet das Gerät beim nächsten Öffnen von selbst.
+Mit **„Aus“** in der Geräteliste schaltest du es wieder ab.
+
+**So funktioniert es:** Music Assistant kann Geräte über das Protokoll „Sendspin“ als
+Lautsprecher einbinden (geprüft mit Version 2.10.9). Die App nutzt dafür dieselbe Bibliothek wie die
+Oberfläche von Music Assistant (`sendspin-js` 5.0.0, liegt im Ordner `vendor/`). Das Handy
+erscheint danach in Music Assistant und Home Assistant als neuer Player mit dem Namen
+z. B. „iPhone (Musik-App)“. Den Namen kannst du in den Einstellungen (Zahnrad) ändern. Das ist
+nötig, wenn zwei gleichartige Geräte die App nutzen, denn die App erkennt ihr Gerät am Namen.
+
+**Zwei Verbindungswege, die App probiert sie der Reihe nach:**
+
+| Weg | Wann | Voraussetzung |
+|---|---|---|
+| direkt zu Music Assistant (Port 8927) | App über `http://` im Heimnetz geöffnet | Handy und Music Assistant im selben Netz |
+| über Home Assistant (Ingress) | sonst, auch über `https://` und von unterwegs | Anmeldung mit einem **Admin-Konto** von Home Assistant |
+
+**Was du wissen solltest:**
+
+- **Der erste Ton braucht einen Tipp.** Browser erlauben Ton erst nach einer Berührung. Wenn es
+  nach dem Öffnen der App stumm bleibt, einmal auf Wiedergabe tippen.
+- **Gesperrter Bildschirm (iPhone):** Ob die Musik bei gesperrtem Bildschirm oder im Hintergrund
+  zuverlässig weiterläuft, ist nicht gesichert. Das hängt von iOS ab und konnte hier nicht auf
+  einem echten iPhone getestet werden. Wenn sie aussetzt, die App wieder nach vorne holen.
+- **Datenmenge:** In Safari über `http://` überträgt Music Assistant unkomprimierten Ton
+  (etwa 1,4 Mbit/s bei CD-Qualität). Im WLAN ist das unproblematisch.
+- **Erscheint „Dieses Gerät“ nicht in Home Assistant?** Dann in Music Assistant unter
+  *Einstellungen → Player* nachsehen, ob das Gerät dort auftaucht und aktiviert ist.
+
+## Warteschlange und Gruppieren
+
+- **Warteschlange:** Home Assistant gibt nur den aktuellen und den nächsten Titel weiter.
+  Mehr kann die App deshalb nicht anzeigen. Die ganze Liste zum Umsortieren gibt es in der
+  Oberfläche von Music Assistant.
+- **Gruppieren:** In der Geräteliste steht hinter jedem passenden Lautsprecher ein **＋**. Damit
+  spielt er dasselbe wie das gerade gewählte Gerät. Ein Tipp auf das Häkchen löst ihn wieder.
+  Welche Lautsprecher sich miteinander gruppieren lassen, bestimmt Music Assistant.
+- **Wiedergabe mitnehmen:** Wenn du ein anderes Gerät wählst, während noch Musik läuft, bietet
+  die App unten „Hierher holen“ an.
+
+## Von unterwegs
 
 Wenn dein Home Assistant von außen erreichbar ist (z. B. über Home Assistant Cloud /
 Nabu Casa), nutze dieselbe Adresse wie für Home Assistant, z. B.
 `https://xxxx.ui.nabu.casa/local/musik/index.html`. Melde dich dort einmal an.
 
 Einschränkung: Der Music Assistant liefert manche Cover als Adresse im Heimnetz
-(`http://10.0.1.112:8095/imageproxy/…`). Unterwegs oder über `https` laden diese Bilder nicht,
+(`http://…:8095/imageproxy/…`). Unterwegs oder über `https` laden diese Bilder nicht,
 die App zeigt dann einen Platzhalter. Steuerung, Bibliothek und Suche funktionieren trotzdem.
-Das Cover unter „Läuft gerade“ kommt über Home Assistant und funktioniert auch unterwegs.
+Das Cover in der Wiedergabe-Ansicht kommt über Home Assistant und funktioniert auch unterwegs.
 
 ## Anmeldung mit Token (Alternative)
 
 Falls die Anmeldung über die Anmeldeseite nicht klappt, gibt es eine Alternative. Das kann
-z. B. passieren, wenn die App nicht über Home Assistant selbst ausgeliefert wird.
+z. B. in der Startbildschirm-App auf dem iPhone passieren.
 
 1. Home Assistant → dein Profil (unten links) → **Sicherheit** → **Langlebige Zugriffstoken** →
    **Token erstellen**
@@ -104,27 +160,31 @@ widerrufen.
 |---|---|
 | Seite nicht gefunden (404) | Liegen die Dateien in `/config/www/musik/`? Gab es `www` vorher nicht, Home Assistant neu starten. |
 | „Kein Music-Assistant-Player gefunden“ | Läuft der Music Assistant und ist die Integration unter *Einstellungen → Geräte & Dienste* geladen? |
-| Bibliothek: „Integration wurde nicht gefunden“ | Die automatische Erkennung hat nicht geklappt (möglich z. B. bei Benutzern ohne Admin-Rechte). Dann die ID unter *Einstellungen (Zahnrad)* eintragen. Du findest sie in Home Assistant unter *Einstellungen → Geräte & Dienste → Music Assistant*, in der Browser-Adresse hinter `config_entry=`. |
+| Start/Bibliothek: „Integration wurde nicht gefunden“ | Die automatische Erkennung hat nicht geklappt (möglich z. B. bei Benutzern ohne Admin-Rechte). Dann die ID unter *Einstellungen (Zahnrad)* eintragen. Du findest sie in Home Assistant unter *Einstellungen → Geräte & Dienste → Music Assistant*, in der Browser-Adresse hinter `config_entry=`. |
+| „Dieses Gerät“: Verbindung fehlgeschlagen | Die Meldung unter dem Eintrag nennt den Grund. Im Heimnetz die App über `http://` öffnen oder mit einem Admin-Konto anmelden. Hat Music Assistant eine andere Adresse als Home Assistant, diese in den Einstellungen eintragen. |
+| „Dieses Gerät“ ist verbunden, aber stumm | Einmal auf Wiedergabe tippen. Lautstärke des Geräts und den Stumm-Schalter am iPhone prüfen. |
 | Anmeldung in der Startbildschirm-App auf dem iPhone hängt | Mit Token anmelden (siehe oben). |
 | Hinweis „https / http“ auf der Anmeldeseite | Die App wurde über `https` geöffnet, Home Assistant läuft aber über `http`. Die App über dieselbe Adresse wie Home Assistant öffnen. |
+| Nach einem Update sieht die App aus wie vorher | Die App ganz schließen (App-Umschalter, nach oben wischen) und neu öffnen. Im Browser die Seite neu laden. |
 
 ## Sicherheit
 
 - Alles in `/config/www` ist **ohne Anmeldung** abrufbar. Die App-Dateien enthalten aber
   keine Zugangsdaten. Die gibt es erst nach der Anmeldung, und sie bleiben auf deinem Gerät.
 - Die App kann nur, was dein Home-Assistant-Benutzer darf.
+- „Dieses Gerät“ verbindet sich ohne Kopplung mit Music Assistant (Gastzugang von Sendspin).
+  Die Verbindung ist verschlüsselt, aber nicht gegen einen Angreifer im eigenen Netz
+  abgesichert, der sich aktiv dazwischenschaltet. Für Musik im Heimnetz ist das üblich.
 
 ## Was (noch) nicht drin ist
 
-- Anzeige und Bearbeitung der Warteschlange
-- Player gruppieren / Multiroom
-- Steuerung auf dem Sperrbildschirm (iOS zeigt dort nur Wiedergabe, die auf dem Gerät selbst läuft)
+- Die vollständige Warteschlange mit Umsortieren (siehe oben)
+- Favoriten setzen und Playlists bearbeiten
 - Eine „echte“ App aus dem App Store bzw. Microsoft Store
 
 ## Updates
 
-Neue Dateien einfach wieder nach `/config/www/musik/` kopieren. Lädt das iPhone noch die alte
-Version, die App einmal ganz schließen (App-Umschalter, nach oben wischen) und neu öffnen.
+Neue Dateien einfach wieder nach `/config/www/musik/` kopieren und die App neu öffnen.
 
 ## Entwicklung und Tests
 
@@ -136,3 +196,8 @@ npm install
 node test.mjs            # automatische Tests
 node mock-ha.mjs         # Test-Server zum Ausprobieren: http://localhost:8123/local/musik/index.html
 ```
+
+In den automatischen Tests ersetzt eine Attrappe die Sendspin-Bibliothek. Die echte Bibliothek
+wurde getrennt gegen einen echten Sendspin-Server geprüft (`aiosendspin` 10.2.1, dieselbe
+Version wie in Music Assistant 2.10.9): Anmeldung, Verschlüsselung und Freischaltung als
+Abspielgerät. Fremdsoftware und Lizenzen: siehe `vendor/LIZENZEN.md`.
