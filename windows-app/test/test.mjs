@@ -30,6 +30,15 @@ const waitCall = async (page, pred) => {
   for (let i = 0; i < 60; i++) { const c = [...mock.state.calls].reverse().find(pred); if (c) return c; await page.waitForTimeout(50); }
   throw new Error('Aufruf nicht gesehen');
 };
+// Erst weiter, wenn der Prozess wirklich beendet ist: sonst trifft der nächste Start
+// unter Windows noch auf die „nur eine Instanz“-Sperre der alten.
+async function closeApp(a) {
+  const proc = a.process();
+  const exited = proc.exitCode !== null ? Promise.resolve() : new Promise((r) => proc.once('exit', r));
+  await a.close();
+  await Promise.race([exited, new Promise((r) => setTimeout(r, 10000))]);
+  await new Promise((r) => setTimeout(r, 1500));
+}
 const clickMenu = (app, top, index) => app.evaluate(({ Menu }, [t, i]) => Menu.getApplicationMenu().items[t].submenu.items[i].click(), [top, index]);
 
 console.log('Musik für Windows – Tests');
@@ -90,7 +99,7 @@ await test('Fremde Adressen werden nicht im Fenster geöffnet', async () => {
 });
 
 await test('Nach Neustart direkt in der App, Anmeldung bleibt erhalten', async () => {
-  await app.close();
+  await closeApp(app);
   app = await launch();
   page = await app.firstWindow();
   await page.waitForURL(`${mock.url}/local/musik/index.html`);
@@ -98,7 +107,7 @@ await test('Nach Neustart direkt in der App, Anmeldung bleibt erhalten', async (
 });
 
 await test('Home Assistant nicht erreichbar → Einrichtung mit Hinweis; Adressen ändern über das Menü', async () => {
-  await app.close();
+  await closeApp(app);
   const cfgFile = path.join(userData, 'einstellungen.json');
   const cfg = JSON.parse(fs.readFileSync(cfgFile, 'utf8'));
   fs.writeFileSync(cfgFile, JSON.stringify({ ...cfg, home: 'http://127.0.0.1:9', remote: '' }));
@@ -114,7 +123,7 @@ await test('Home Assistant nicht erreichbar → Einrichtung mit Hinweis; Adresse
   assert.equal(await page.inputValue('#home'), mock.url);
 });
 
-await app.close();
+await closeApp(app);
 await mock.close();
 fs.rmSync(userData, { recursive: true, force: true });
 console.log(`${passed} Tests bestanden${process.exitCode ? ', es gab Fehler' : ''}.`);
