@@ -170,3 +170,6 @@ python -m unittest -v
 Im Ordner [`musik-app/`](musik-app/README.md) liegt eine Web-App (PWA) für iPhone und Windows,
 mit der sich der Music Assistant über Home Assistant steuern lässt (Start, Suche, Bibliothek,
 Warteschlange, Gruppieren) und die Musik auch direkt am Handy oder PC abspielt.
+
+Dazu gibt es in [`windows-app/`](windows-app/README.md) ein Windows-Programm mit Installer,
+das diese Oberfläche in einem eigenen Fenster zeigt (Medientasten, Taskleisten-Knöpfe).

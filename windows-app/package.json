@@ -1,0 +1,62 @@
+{
+  "name": "musik-windows",
+  "productName": "Musik",
+  "version": "1.0.0",
+  "description": "Musik – Music Assistant über Home Assistant (Windows-App)",
+  "author": "patricstar1986",
+  "license": "UNLICENSED",
+  "private": true,
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node test/test.mjs",
+    "dist": "electron-builder --win nsis --x64"
+  },
+  "devDependencies": {
+    "electron": "45.3.0",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "musik.musicassistant.windows",
+    "productName": "Musik",
+    "files": [
+      "src/**/*",
+      "build/icon.png"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "electronLanguages": [
+      "de",
+      "en-US"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "artifactName": "Musik-Setup-${version}.exe",
+      "shortcutName": "Musik",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerLanguages": [
+        "de_DE"
+      ],
+      "language": "1031",
+      "uninstallDisplayName": "Musik"
+    },
+    "publish": null
+  }
+}

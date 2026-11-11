@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src file:">
+  <meta name="color-scheme" content="dark light">
+  <title>Musik – Einrichtung</title>
+  <style>
+    :root { --bg: #101114; --bg-2: #191b20; --fg: #f4f5f7; --muted: #9da3ae; --line: #2a2d35; --accent: #7c8cff; --accent-fg: #0d0f1a; --danger: #ff6b6b; color-scheme: dark; }
+    @media (prefers-color-scheme: light) {
+      :root { --bg: #f6f6f8; --bg-2: #fff; --fg: #15171b; --muted: #606774; --line: #dddfe5; --accent: #4353d6; --accent-fg: #fff; color-scheme: light; }
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--bg); color: var(--fg); font: 16px/1.45 "Segoe UI", system-ui, sans-serif; display: grid; place-items: center; padding: 24px; }
+    main { width: 100%; max-width: 460px; display: flex; flex-direction: column; gap: 10px; }
+    img { width: 72px; height: 72px; border-radius: 18px; align-self: center; }
+    h1 { margin: 0; text-align: center; font-size: 28px; }
+    p { margin: 0; }
+    .muted { color: var(--muted); }
+    .center { text-align: center; margin-bottom: 10px; }
+    label { font-size: 14px; color: var(--muted); margin-top: 6px; }
+    input { width: 100%; min-height: 44px; padding: 10px 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg-2); color: inherit; font: inherit; }
+    input:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button { min-height: 46px; margin-top: 10px; border: 0; border-radius: 999px; background: var(--accent); color: var(--accent-fg); font: inherit; font-weight: 600; cursor: pointer; }
+    button:disabled { opacity: .5; cursor: default; }
+    .error { color: var(--danger); }
+    .small { font-size: 13px; }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="../build/icon.png" alt="">
+    <h1>Musik</h1>
+    <p class="muted center">Wo erreicht dieser PC dein Home Assistant?</p>
+    <p id="message" class="error" role="alert" hidden></p>
+
+    <label for="home">Adresse zu Hause</label>
+    <input id="home" type="text" spellcheck="false" placeholder="http://homeassistant.local:8123">
+    <label for="remote">Adresse für unterwegs (optional, z. B. Nabu Casa)</label>
+    <input id="remote" type="text" spellcheck="false" placeholder="https://….ui.nabu.casa">
+
+    <button id="save">Verbinden</button>
+    <p class="muted small">
+      Die App probiert zuerst die Adresse zu Hause und nimmt sonst die für unterwegs.
+      Die Adressen lassen sich später über das Menü ändern (Alt-Taste → Musik → Adressen ändern).
+    </p>
+    <p id="version" class="muted small"></p>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const show = (text) => { $('message').textContent = text; $('message').hidden = !text; };
+    show(new URLSearchParams(location.search).get('meldung') || '');
+    window.musikSetup.get().then((c) => {
+      $('home').value = c.home || '';
+      $('remote').value = c.remote || '';
+      $('version').textContent = 'Musik für Windows ' + c.version;
+      if (!c.home && !c.remote) $('home').value = 'http://homeassistant.local:8123';
+      $('home').focus();
+    });
+    async function save() {
+      $('save').disabled = true;
+      $('save').textContent = 'Prüfe Verbindung …';
+      show('');
+      const r = await window.musikSetup.save({ home: $('home').value, remote: $('remote').value });
+      if (!r.ok) {
+        show(r.error);
+        $('save').disabled = false;
+        $('save').textContent = 'Verbinden';
+      }
+    }
+    $('save').addEventListener('click', save);
+    document.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !$('save').disabled) save(); });
+  </script>
+</body>
+</html>

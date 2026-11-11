@@ -1,0 +1,70 @@
+# Baut die Windows-App auf einem echten Windows-Rechner, testet sie und
+# installiert den Installer zur Probe. Der fertige Installer hängt am Lauf als "Artifact".
+name: Windows-App
+
+on:
+  push:
+    paths:
+      - 'windows-app/**'
+      - '.github/workflows/windows-app.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Abhängigkeiten installieren
+        shell: pwsh
+        run: |
+          Push-Location tests/musik-app; npm ci --no-audit --no-fund; Pop-Location
+          Push-Location windows-app; npm ci --no-audit --no-fund; npm install --no-save --no-audit --no-fund playwright; Pop-Location
+
+      - name: Tests (Electron gegen nachgebauten Home Assistant)
+        working-directory: windows-app
+        run: node test/test.mjs
+
+      - name: Installer bauen
+        working-directory: windows-app
+        run: npm run dist
+
+      - name: Probe-Installation und Start
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem windows-app/dist/Musik-Setup-*.exe | Select-Object -First 1
+          Write-Host "Installiere $($setup.Name) ($([math]::Round($setup.Length/1MB)) MB)"
+          $p = Start-Process $setup.FullName -ArgumentList '/S' -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "Installer endete mit Code $($p.ExitCode)" }
+          $exe = Get-ChildItem "$env:LOCALAPPDATA\Programs" -Recurse -Filter Musik.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) { throw 'Musik.exe wurde nach der Installation nicht gefunden' }
+          Write-Host "Installiert nach: $($exe.FullName)"
+          $links = @(Get-ChildItem "$env:APPDATA\Microsoft\Windows\Start Menu\Programs" -Recurse -Filter 'Musik.lnk' -ErrorAction SilentlyContinue) + @(Get-ChildItem ([Environment]::GetFolderPath('Desktop')) -Filter 'Musik.lnk' -ErrorAction SilentlyContinue)
+          Write-Host "Verknüpfungen: $($links.FullName -join ', ')"
+          if ($links.Count -lt 1) { throw 'Keine Verknüpfung angelegt' }
+          $app = Start-Process $exe.FullName -PassThru
+          Start-Sleep -Seconds 12
+          $running = Get-Process -Name Musik -ErrorAction SilentlyContinue
+          if (-not $running) { throw 'Die installierte App läuft nach 12 Sekunden nicht mehr' }
+          Write-Host "App läuft ($($running.Count) Prozesse), Fenstertitel: $(($running | Where-Object MainWindowTitle | Select-Object -First 1).MainWindowTitle)"
+          $cfg = "$env:APPDATA\Musik"
+          Write-Host "Datenordner vorhanden: $(Test-Path $cfg)"
+          $running | Stop-Process -Force
+          $un = Get-ChildItem $exe.DirectoryName -Filter 'Uninstall*.exe' | Select-Object -First 1
+          if (-not $un) { throw 'Kein Deinstallationsprogramm gefunden' }
+          Write-Host "Deinstallation vorhanden: $($un.Name)"
+
+      - name: Installer bereitstellen
+        uses: actions/upload-artifact@v4
+        with:
+          name: Musik-Setup
+          path: windows-app/dist/Musik-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 30
