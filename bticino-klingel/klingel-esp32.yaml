@@ -1,0 +1,59 @@
+# ESPHome: Klingel-Erkennung für BTicino Classe 300X (344642)
+# Abgriff am Zusatzläutwerk-Ausgang (Klemmen 1 – 5M) über einen Optokoppler.
+# Schaltung und Messanleitung: siehe README.md in diesem Ordner.
+#
+# Vor dem Flashen: secrets.yaml mit wifi_ssid, wifi_password und api_key anlegen.
+
+esphome:
+  name: bticino-klingel
+  friendly_name: BTicino Klingel
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+binary_sensor:
+  # Optokoppler-Transistor zwischen GPIO27 und GND.
+  # Klingelt es, leitet der Transistor und zieht den Pin auf LOW.
+  - platform: gpio
+    id: klingel_signal
+    name: "Klingel aktiv"
+    pin:
+      number: GPIO27
+      mode:
+        input: true
+        pullup: true
+      inverted: true
+    filters:
+      # Kurze Störimpulse ignorieren.
+      - delayed_on: 50ms
+      # Falls der Ausgang gepulst/als Wechselsignal kommt: Pulse zu einem
+      # durchgehenden "Klingeln" zusammenfassen.
+      - delayed_off: 1500ms
+    on_press:
+      - event.trigger:
+          id: klingel_event
+          event_type: ring
+
+event:
+  # Erscheint in Home Assistant als Türklingel-Ereignis (event.bticino_klingel_klingel).
+  - platform: template
+    id: klingel_event
+    name: "Klingel"
+    device_class: doorbell
+    event_types:
+      - ring
