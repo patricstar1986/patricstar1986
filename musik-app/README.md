@@ -10,8 +10,11 @@ darüber der Mini-Player, und ein Tipp darauf öffnet die große Wiedergabe-Ansi
 
 ## Funktionen
 
-- **Startseite:** große Kacheln mit den zuletzt gespielten Playlists, dazu Reihen wie „Zuletzt gehört“,
-  „Neu in deiner Mediathek“, Künstler, Radiosender und „Wiederentdecken“.
+- **Startseite:** große Kacheln und Reihen. Mit direktem Draht zu Music Assistant (siehe unten) kommen
+  die **Empfehlungen deiner Musikdienste** und Reihen wie „Zuletzt gespielt“ oder „Vergessene Alben“ dazu.
+  Außerdem „Neueste Alben“ (nach Erscheinungsjahr, aus deiner Mediathek) und Radiosender.
+- **Stöbern:** In „Suchen“ (am PC: „Entdecken“) stehen Kacheln für Musikrichtungen. Ein Tipp zeigt
+  Playlists, Beispiel-Interpreten und Alben dazu, von deinen Musikdiensten und aus deiner Mediathek.
 - **Radio:** eigener Bereich mit deinen Sendern.
 - **Suchen** in der Mediathek und bei deinen Musikdiensten, auf Wunsch nur in der Mediathek.
 - **Mediathek:** Playlists, Alben, Künstler, Titel, Radio, Podcasts und Hörbücher. Mit Filter,
@@ -21,7 +24,9 @@ darüber der Mini-Player, und ein Tipp darauf öffnet die große Wiedergabe-Ansi
 - **Geräte:** Lautsprecher wählen, laufende Musik auf ein anderes Gerät mitnehmen,
   mehrere Lautsprecher **gruppieren** (mit Lautstärke je Raum).
 - **Dieses Gerät:** Das Handy bzw. der PC wird selbst zum Lautsprecher (siehe unten).
-- **Warteschlange:** aktueller und nächster Titel, Anzahl der Titel, Zufall, Leeren.
+- **Warteschlange:** mit direktem Draht zu Music Assistant die ganze Liste (Titel anspringen, entfernen),
+  sonst aktueller und nächster Titel. Dazu Zufall und Leeren.
+- **Am PC** (breites Fenster): Seitenleiste mit Suche, Mediathek und deinen Playlists, Wiedergabeleiste oben.
 - **Abspielen-Optionen** (⋮): Jetzt abspielen, Warteschlange ersetzen, Als Nächstes,
   Zur Warteschlange hinzufügen, Radio starten.
 - Die Verbindung wird automatisch wiederhergestellt, z. B. nach dem Entsperren des iPhones.
@@ -46,6 +51,8 @@ Danach sollte es so aussehen:
 /config/www/musik/app.js
 /config/www/musik/ha.js
 /config/www/musik/local.js
+/config/www/musik/ingress.js
+/config/www/musik/ma.js
 /config/www/musik/style.css
 /config/www/musik/sw.js
 /config/www/musik/manifest.webmanifest
@@ -125,11 +132,32 @@ nötig, wenn zwei gleichartige Geräte die App nutzen, denn die App erkennt ihr 
 - **Erscheint „Dieses Gerät“ nicht in Home Assistant?** Dann in Music Assistant unter
   *Einstellungen → Player* nachsehen, ob das Gerät dort auftaucht und aktiviert ist.
 
+## Direkter Draht zu Music Assistant (Empfehlungen, Stöbern, volle Warteschlange)
+
+Home Assistant gibt von Music Assistant nur die Mediathek und die Suche weiter. Empfehlungen,
+Musikrichtungen und die vollständige Warteschlange holt die App deshalb direkt bei Music Assistant
+ab, über denselben Weg wie „Dieses Gerät“ (Home-Assistant-Ingress).
+
+**Voraussetzungen:** Die App ist aus Home Assistant geöffnet (`/local/musik/`, lokal oder über
+Nabu Casa) und du bist mit einem **Admin-Konto** angemeldet. Ob die Verbindung steht, zeigen die
+Einstellungen (Zahnrad) unter „Empfehlungen und volle Warteschlange“.
+
+Ohne diese Verbindung läuft die App wie bisher mit den Reihen aus Home Assistant. Stöbern nach
+Musikrichtung funktioniert dann trotzdem, zeigt aber nur die Treffer der Musikdienste.
+
+Als Nebeneffekt laden über `https` (Nabu Casa) dann auch die Cover, die Music Assistant nur mit
+einer Heimnetz-Adresse liefert.
+
+**Was es nicht gibt:** Welche Empfehlungen erscheinen, bestimmt Music Assistant. Für Apple Music
+sind das nach dem Quellcode von Version 2.10.9 die persönlichen Sender und Mixe, keine
+Neuerscheinungen. Eine echte Liste „wer hat gerade ein neues Album“ bietet Music Assistant nicht an.
+„Neueste Alben“ zeigt deshalb nur Alben aus deiner Mediathek, sortiert nach Erscheinungsjahr.
+
 ## Warteschlange und Gruppieren
 
-- **Warteschlange:** Home Assistant gibt nur den aktuellen und den nächsten Titel weiter.
-  Mehr kann die App deshalb nicht anzeigen. Die ganze Liste zum Umsortieren gibt es in der
-  Oberfläche von Music Assistant.
+- **Warteschlange:** Mit dem direkten Draht siehst du die ganze Liste ab dem aktuellen Titel, kannst
+  Titel anspringen und entfernen. Ohne ihn gibt Home Assistant nur den aktuellen und den nächsten
+  Titel weiter.
 - **Gruppieren:** In der Geräteliste steht hinter jedem passenden Lautsprecher ein **＋**. Damit
   spielt er dasselbe wie das gerade gewählte Gerät. Ein Tipp auf das Häkchen löst ihn wieder.
   Welche Lautsprecher sich miteinander gruppieren lassen, bestimmt Music Assistant.
@@ -184,7 +212,8 @@ widerrufen.
 
 ## Was (noch) nicht drin ist
 
-- Die vollständige Warteschlange mit Umsortieren (siehe oben)
+- Warteschlange umsortieren per Ziehen
+- Neuerscheinungen der Musikdienste (bietet Music Assistant nicht an)
 - Favoriten setzen und Playlists bearbeiten
 - Eine „echte“ App aus dem App Store bzw. Microsoft Store
 
@@ -202,6 +231,10 @@ npm install
 node test.mjs            # automatische Tests
 node mock-ha.mjs         # Test-Server zum Ausprobieren: http://localhost:8123/local/musik/index.html
 ```
+
+Die Schnittstelle von Music Assistant (Empfehlungen, Musikrichtungen, Warteschlange) ist im
+Test-Server nach dem Quellcode von Music Assistant 2.10.9 nachgebaut. Gegen einen echten
+Music-Assistant-Server wurde dieser Teil nicht getestet.
 
 In den automatischen Tests ersetzt eine Attrappe die Sendspin-Bibliothek. Die echte Bibliothek
 wurde getrennt gegen einen echten Sendspin-Server geprüft (`aiosendspin` 10.2.1, dieselbe

@@ -44,7 +44,7 @@ const waitCall = async (page, pred) => {
   for (let i = 0; i < 60; i++) { const c = lastCall(pred); if (c) return c; await page.waitForTimeout(50); }
   throw new Error('Aufruf nicht gesehen');
 };
-const IGNORED = /broken\.jpg|ERR_CONNECTION_REFUSED|ERR_UNSAFE_PORT|:8927\/sendspin/;
+const IGNORED = /broken\.jpg|ERR_CONNECTION_REFUSED|ERR_UNSAFE_PORT|ERR_TUNNEL_CONNECTION_FAILED|ERR_NAME_NOT_RESOLVED|example\.invalid|:8927\/sendspin/;
 
 async function newPage(opts = { viewport: { width: 1280, height: 860 } }) {
   const ctx = await browser.newContext(opts);
@@ -74,7 +74,7 @@ await test('Startseite: große Kacheln, Reihen und Mini-Player', async () => {
   await page.waitForFunction(() => document.querySelectorAll('#home .hero:not(.skeleton)').length === 8);
   await page.waitForFunction(() => !document.querySelector('#home .skeleton'));
   const titles = await page.$$eval('#home .shelf-title', (h) => h.map((x) => x.textContent));
-  assert.deepEqual(titles, ['Zuletzt gehört', 'Neu in deiner Mediathek', 'Künstler aus deiner Mediathek', 'Radiosender', 'Wiederentdecken']);
+  assert.deepEqual(titles, ['Deine Playlists', 'Zuletzt gehört', 'Neu in deiner Mediathek', 'Künstler aus deiner Mediathek', 'Radiosender', 'Wiederentdecken', 'Neueste Alben']);
   assert.equal(await page.textContent('#home .hero .hero-over'), 'Playlist');
   assert.equal(await page.textContent('#pageTitle'), 'Startseite');
   assert.equal(await page.textContent('#deviceName'), 'AMBEO Soundbar Plus', 'spielender Player automatisch gewählt');
@@ -194,8 +194,7 @@ await test('Dieses Gerät: als Lautsprecher anmelden und Musik darauf starten', 
   assert.ok(await page.$eval('#deviceBtn', (b) => b.classList.contains('local')));
   await page.keyboard.press('Escape');
 
-  await page.click('.tab[data-tab=search]');
-  await page.fill('#searchInput', 'antenne');
+  await page.fill('#sideSearch', 'antenne');
   await page.click('#searchResults .card:has-text("Antenne Vorarlberg") .card-hit');
   const c = await waitCall(page, (x) => x.service === 'play_media' && x.data.media_id === 'tunein://radio/s1');
   assert.deepEqual(c.target, { entity_id: 'media_player.browser_musik_app' });
@@ -213,11 +212,77 @@ await test('Dieses Gerät: als Lautsprecher anmelden und Musik darauf starten', 
   await page.keyboard.press('Escape');
 });
 
+await test('Startseite mit Empfehlungen direkt von Music Assistant', async () => {
+  await page.click('.tab[data-tab=home]');
+  await page.click('.tab[data-tab=home]'); // zweiter Klick lädt neu
+  await page.waitForFunction(() => document.querySelectorAll('#maTop .hero').length === 3);
+  assert.deepEqual(await page.$$eval('#maTop .shelf-title', (h) => h.map((x) => x.textContent)), ['Für dich zusammengestellt']);
+  assert.deepEqual(await page.$$eval('#maTop .hero-title', (h) => h.map((x) => x.textContent)), ['Patrics Sender', 'Energie', 'Chill-Mix'], 'Ordner werden ausgelassen');
+  await page.waitForFunction(() => document.querySelectorAll('#maLib .shelf-title').length === 2);
+  assert.deepEqual(await page.$$eval('#maLib .shelf-title', (h) => h.map((x) => x.textContent)), ['Zuletzt gespielt', 'Vergessene Alben'], 'deutsche Titel, abgeschaltete und leere Reihen fehlen');
+  const shelves = await page.$$eval('#home [data-shelf]', (e) => e.map((x) => x.dataset.shelf));
+  assert.deepEqual(shelves, ['hero', 'radio', 'newest'], 'doppelte Reihen aus Home Assistant entfallen');
+  const src = await page.getAttribute('#maTop .hero:has-text("Energie") img', 'src');
+  assert.match(src, /\/api\/hassio_ingress\/TESTINGRESSTOKEN\/imageproxy\/px901\?size=256$/, 'Bilder über Home Assistant');
+  await page.waitForFunction(() => document.querySelector('#maTop .hero:nth-child(2) img')?.naturalWidth > 0);
+  await shot(page, 'desktop-empfehlungen');
+  await page.click('#maLib .card:has-text("50ft Queenie") .card-hit');
+  const c = await waitCall(page, (x) => x.service === 'play_media' && x.data.media_id === 'library://track/18335');
+  assert.equal(c.data.media_type, 'track');
+});
+
+await test('Stöbern: Musikrichtung wählen, Beispiele aus Diensten und Mediathek', async () => {
+  await page.click('#sideBrowse');
+  await page.waitForSelector('#browse .genre-tile');
+  assert.equal(await page.$$eval('#browse .genre-tile', (t) => t.length), 26);
+  await shot(page, 'desktop-stoebern');
+  await page.click('#browse .genre-tile:has-text("Rock")');
+  await page.waitForSelector('#detail .genre-head:has-text("Rock")');
+  await page.waitForSelector('#detail .card:has-text("Rock Antenne")');
+  const s = await waitCall(page, (x) => x.service === 'search' && x.data.name === 'Rock');
+  assert.equal(s.data.library_only, false);
+  await page.waitForSelector('#detail h3:has-text("Künstler aus deiner Mediathek")');
+  const titles = await page.$$eval('#detail h3', (h) => h.map((x) => x.textContent));
+  assert.deepEqual(titles, ['Radiosender', 'Künstler aus deiner Mediathek', 'Alben aus deiner Mediathek']);
+  assert.deepEqual(lastCall((x) => x.ma === 'music/genres/overview').args, { item_id: '7', limit: 20 });
+  await shot(page, 'desktop-musikrichtung');
+  await page.click('#detail .card:has-text("Innuendo") .card-hit');
+  await page.waitForSelector('#detail .detail-title:has-text("Innuendo")');
+  await page.click('#backBtn');
+  await page.waitForSelector('#detail .genre-head:has-text("Rock")');
+  await page.click('#backBtn');
+  await page.waitForSelector('#browse .genre-tile');
+});
+
+await test('Vollständige Warteschlange: anzeigen, Titel anspringen, entfernen', async () => {
+  const id = 'media_player.kuche_2';
+  Object.assign(mock.state.states[id].attributes, { media_title: 'Titel 4', media_artist: 'Künstler 4', media_content_id: 'library://track/4', media_duration: 184, media_position: 3, media_position_updated_at: new Date().toISOString() });
+  mock.state.states[id].state = 'playing';
+  mock.state.queues[id] = { items: 18, index: 4 };
+  mock.emitState(id);
+  await page.click('#deviceBtn');
+  await page.click(`#sheetBody .sheet-item[data-entity="${id}"] .grow-btn`);
+  await page.waitForFunction(() => document.querySelector('#miniTitle').textContent === 'Titel 4');
+  await page.click('#miniQueue');
+  await page.waitForFunction(() => document.querySelectorAll('#queueList .row').length === 14);
+  assert.deepEqual(lastCall((x) => x.ma === 'player_queues/items').args.offset, 4);
+  assert.match(await page.textContent('#sheetBody'), /Titel 5 von 18/);
+  assert.match(await page.textContent('#queueList .row.playing'), /Titel 4.*Läuft gerade/s);
+  assert.match(await page.getAttribute('#queueList .row:nth-child(2) img', 'src'), /imageproxy\/pq5\?size=256$/);
+  await shot(page, 'desktop-warteschlange-voll');
+  await page.click('#queueList .row:nth-child(3) .row-main');
+  assert.deepEqual((await waitCall(page, (x) => x.ma === 'player_queues/play_index')).args, { queue_id: 'up20', index: 'qi6' });
+  await page.click('#queueList .row:nth-child(2) .icon-btn');
+  assert.deepEqual((await waitCall(page, (x) => x.ma === 'player_queues/delete_item')).args, { queue_id: 'up20', item_id_or_index: 'qi5' });
+  await page.waitForFunction(() => document.querySelectorAll('#queueList .row').length === 13);
+  await page.keyboard.press('Escape');
+});
+
 await test('Radio: eigener Bereich mit den Sendern der Mediathek', async () => {
   await page.click('.tab[data-tab=radio]');
   assert.equal(await page.textContent('#pageTitle'), 'Radio');
   await page.waitForSelector('#radio .card:has-text("Antenne Vorarlberg")');
-  assert.equal(await page.$$eval('#radio .card', (c) => c.length), 2);
+  assert.equal(await page.$$eval('#radio .card', (c) => c.length), 3);
   await page.click('#radio .btn');
   await page.waitForSelector('#view-search:not([hidden])');
   assert.equal(await page.textContent('#searchTypes .chip.active'), 'Radio');
@@ -241,9 +306,9 @@ await test('Bibliothek: Playlists laden, nachladen, kaputte Bilder, Favoriten', 
 
 await test('„Alle anzeigen“ führt in die passende Bibliotheksansicht', async () => {
   await page.click('.tab[data-tab=home]');
-  await page.click('#home [data-shelf=new] .shelf-more');
+  await page.click('#home [data-shelf=newest] .shelf-more');
   await page.waitForSelector('#libList .card:has-text("Classic Queen")');
-  assert.equal(await page.inputValue('#libOrder'), 'timestamp_added_desc');
+  assert.equal(await page.inputValue('#libOrder'), 'year_desc');
   assert.equal(await page.textContent('#libTypes .chip.active'), 'Alben');
 });
 
@@ -276,9 +341,9 @@ await test('Künstler → Alben → Album (verschachtelt)', async () => {
 });
 
 await test('Suche mit Gruppen und „Als Nächstes“', async () => {
-  await page.click('.tab[data-tab=search]');
-  await page.fill('#searchInput', 'queen');
+  await page.fill('#sideSearch', 'queen');
   await page.waitForSelector('#searchResults h3:has-text("Künstler")');
+  assert.equal(await page.inputValue('#searchInput'), 'queen');
   const titles = await page.$$eval('#searchResults h3', (h) => h.map((x) => x.textContent));
   assert.deepEqual(titles, ['Künstler', 'Alben', 'Titel', 'Radio']);
   await page.click('#searchResults .row:has-text("50ft Queenie") .icon-btn');
@@ -298,7 +363,7 @@ await test('Warteschlange leeren', async () => {
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.querySelector('#nowTitle').textContent === 'Nichts in der Wiedergabe');
   await page.keyboard.press('Escape');
-  assert.equal(await page.isVisible('#mini'), false, 'Mini-Player verschwindet ohne Musik');
+  assert.equal(await page.textContent('#miniTitle'), 'Nichts in der Wiedergabe');
 });
 
 await test('Verbindung bricht ab und wird wiederhergestellt', async () => {
@@ -400,6 +465,9 @@ await test('iPhone: Bedienung passt auf den Bildschirm', async () => {
   assert.equal(await overflow(), 0);
   await shot(phone, 'iphone-album');
   await phone.click('.tab[data-tab=search]');
+  await phone.waitForSelector('#browse .genre-tile');
+  assert.equal(await overflow(), 0);
+  await shot(phone, 'iphone-stoebern');
   await phone.fill('#searchInput', 'queen');
   await phone.waitForSelector('#searchResults h3');
   assert.equal(await overflow(), 0);
@@ -412,7 +480,7 @@ await test('Update: veraltete Startdatei im Zwischenspeicher lädt sich selbst n
   const read = (f) => fs.readFileSync(new URL(f, dir), 'utf8');
   const version = JSON.parse(read('version.json')).version;
   assert.match(read('app.js'), new RegExp(`APP_VERSION = '${version.replace(/\\./g, '\\\\.')}'`), 'app.js und version.json nennen dieselbe Version');
-  for (const [file, refs] of [['index.html', ['style.css', 'app.js']], ['app.js', ['ha.js', 'local.js']], ['sw.js', ['app.js', 'ha.js', 'local.js', 'style.css']]]) {
+  for (const [file, refs] of [['index.html', ['style.css', 'app.js']], ['app.js', ['ha.js', 'local.js', 'ingress.js', 'ma.js']], ['sw.js', ['app.js', 'ha.js', 'local.js', 'ingress.js', 'ma.js', 'style.css']]]) {
     for (const ref of refs) assert.ok(read(file).includes(`${ref}?v=${version}`), `${file} verweist auf ${ref}?v=${version}`);
   }
   // Home Assistant meldet eine neuere Version, der Browser hat noch die alte Seite

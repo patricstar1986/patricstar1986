@@ -2,10 +2,12 @@
 import {
   AuthError, loadAuth, saveAuth, normalizeUrl, servedByHomeAssistant, startLogin,
   finishLoginFromUrl, logout, HAConnection, F, supports, currentPosition, formatTime,
-} from './ha.js?v=2.1.1';
-import { LocalPlayer, defaultDeviceName } from './local.js?v=2.1.1';
+} from './ha.js?v=2.2.0';
+import { LocalPlayer, defaultDeviceName } from './local.js?v=2.2.0';
+import { Ingress } from './ingress.js?v=2.2.0';
+import { MusicAssistantApi } from './ma.js?v=2.2.0';
 
-const APP_VERSION = '2.1.1';
+const APP_VERSION = '2.2.0';
 const PAGE = 50;
 const SETTINGS_KEY = 'musikapp.settings';
 const GROUPING = 524288; // MediaPlayerEntityFeature.GROUPING
@@ -29,6 +31,9 @@ const P = {
   gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z',
   home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
   forward: 'M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z',
+  grid: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z',
+  clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z',
+  close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
   broadcast: 'M12 10.5a1.5 1.5 0 100 3 1.5 1.5 0 000-3zM8.46 8.46a5 5 0 000 7.08l1.06-1.06a3.5 3.5 0 010-4.96L8.46 8.46zm7.08 0l-1.06 1.06a3.5 3.5 0 010 4.96l1.06 1.06a5 5 0 000-7.08zM5.64 5.64a9 9 0 000 12.72l1.06-1.06a7.5 7.5 0 010-10.6L5.64 5.64zm12.72 0L17.3 6.7a7.5 7.5 0 010 10.6l1.06 1.06a9 9 0 000-12.72z',
   note: 'M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z',
   library: 'M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm-2 5h-3v5.5c0 1.38-1.12 2.5-2.5 2.5S10 13.88 10 12.5s1.12-2.5 2.5-2.5c.57 0 1.08.19 1.5.51V5h4v2z',
@@ -110,8 +115,13 @@ const S = {
   localConnectedAt: 0,
 };
 
+// Zugang zu Music Assistant über Home Assistant: für „Dieses Gerät“ und für Empfehlungen,
+// Musikrichtungen und die volle Warteschlange (die Home Assistant selbst nicht weitergibt).
+const ingress = new Ingress({ getConn: () => S.conn, getHassUrl: () => S.auth?.hassUrl || location.origin });
+const ma = new MusicAssistantApi(ingress);
+
 const local = new LocalPlayer({
-  getConn: () => S.conn,
+  ingress,
   getHassUrl: () => S.auth?.hassUrl || location.origin,
   getHostHints: () => [S.settings.maHost, ...S.maHosts].filter(Boolean),
 });
@@ -144,7 +154,52 @@ const HOME_SHELVES = [
   { key: 'artists', title: 'Künstler aus deiner Mediathek', type: 'artist', order: 'random', limit: 14 },
   { key: 'radio', title: 'Radiosender', type: 'radio', order: 'name', limit: 14 },
   { key: 'discover', title: 'Wiederentdecken', type: 'album', order: 'random', limit: 14 },
+  { key: 'newest', title: 'Neueste Alben', type: 'album', order: 'year_desc', limit: 14 },
 ];
+// Diese Reihen liefert Music Assistant selbst besser (siehe MA_ROW_TITLE); dann entfallen sie hier.
+const HOME_SHELVES_COVERED_BY_MA = ['recent', 'new', 'artists', 'discover'];
+
+// Reihen aus der Mediathek, wie Music Assistant sie anbietet (Kennung → Überschrift)
+const MA_ROW_TITLE = {
+  in_progress: 'Weiterhören', recently_played: 'Zuletzt gespielt', recently_added_tracks: 'Neu hinzugefügte Titel',
+  recently_added_albums: 'Neu hinzugefügte Alben', random_artists: 'Künstler für dich', random_albums: 'Zufällige Alben',
+  recent_favorite_tracks: 'Neue Lieblingstitel', favorite_playlists: 'Lieblings-Playlists', favorite_radio: 'Lieblingssender',
+  recent_artists: 'Zuletzt gehörte Künstler', recent_tracks: 'Zuletzt gehörte Titel', forgotten_tracks: 'Lange nicht gehört',
+  forgotten_albums: 'Vergessene Alben', forgotten_artists: 'Lange nicht gehörte Künstler',
+  most_played_tracks: 'Meistgespielt', never_played_tracks: 'Noch nie gehört',
+};
+
+// Musikrichtungen zum Stöbern: Name, Suchbegriff bei den Musikdiensten, Farben der Kachel,
+// mögliche Namen derselben Richtung in Music Assistant (für Inhalte aus der eigenen Mediathek).
+const GENRES = [
+  ['Pop', 'Pop', '#ff5f9e', '#ff9a5a', ['pop']],
+  ['Rock', 'Rock', '#d7263d', '#7b1e3a', ['rock']],
+  ['Hip-Hop', 'Hip-Hop', '#f6a01a', '#c1440e', ['hiphop', 'hiphoprap', 'rap']],
+  ['Deutschrap', 'Deutschrap', '#3a3a3a', '#b0122b', ['deutschrap', 'germanhiphop']],
+  ['Indie', 'Indie', '#2ec4b6', '#1b6b8f', ['indie', 'indierock', 'indiepop']],
+  ['Alternative', 'Alternative', '#6a4c93', '#2d1e4f', ['alternative', 'alternativerock']],
+  ['Elektronisch', 'Electronic', '#00c2ff', '#3a47d5', ['electronic', 'elektronisch', 'electronica']],
+  ['Dance', 'Dance', '#f72585', '#7209b7', ['dance', 'edm']],
+  ['Metal', 'Metal', '#4b5563', '#111827', ['metal', 'heavymetal']],
+  ['Punk', 'Punk', '#a3e635', '#3f6212', ['punk', 'punkrock']],
+  ['Jazz', 'Jazz', '#c08a3e', '#5b3a1e', ['jazz']],
+  ['Klassik', 'Klassik', '#d4b483', '#7d5a2f', ['classical', 'klassik']],
+  ['Schlager', 'Schlager', '#ff7ac6', '#b5179e', ['schlager']],
+  ['Country', 'Country', '#e9a23b', '#8a4b08', ['country']],
+  ['R&B / Soul', 'R&B', '#8e6bff', '#40238a', ['rb', 'rnb', 'rbsoul', 'soul']],
+  ['Reggae', 'Reggae', '#2fb344', '#d6a100', ['reggae']],
+  ['Blues', 'Blues', '#3a6ea5', '#16324f', ['blues']],
+  ['Folk', 'Folk', '#8aa05c', '#3f5220', ['folk', 'singersongwriter']],
+  ['Latin', 'Latin', '#ff6b35', '#c9184a', ['latin']],
+  ['Soundtrack', 'Soundtrack', '#5c7cfa', '#1c2a6b', ['soundtrack', 'soundtracks']],
+  ['Kinder', 'Kinderlieder', '#ffd43b', '#f08c00', ['childrens', 'kinder', 'childrensmusic']],
+  ['Chillout', 'Chill', '#74c0fc', '#3b5bdb', ['chillout', 'chill', 'ambient']],
+  ['Party', 'Party', '#ff3d81', '#ffa94d', ['party']],
+  ['Workout', 'Workout', '#fa5252', '#862e9c', ['workout', 'fitness']],
+  ['80er', '80er Hits', '#22b8cf', '#be4bdb', ['80s']],
+  ['90er', '90er Hits', '#94d82d', '#1098ad', ['90s']],
+].map(([name, query, c1, c2, aliases]) => ({ kind: 'genre', name, query, c1, c2, aliases }));
+const normGenre = (x) => String(x || '').toLowerCase().replace(/[^a-z0-9äöü]/g, '');
 
 // ---------- Anmeldung ----------
 function showLogin(message) {
@@ -218,7 +273,15 @@ async function connect() {
     hideBanner();
     updatePlayers();
     renderAll();
+    // Draht zu Music Assistant aufbauen (geht nur als Admin und wenn die App aus Home Assistant kommt).
+    // Kurz abwarten, damit Bilder gleich über diesen Weg geladen werden; sonst im Hintergrund weiter.
+    if (ingress.possible) {
+      const attempt = ma.ensure().catch(() => {});
+      await Promise.race([attempt, new Promise((r) => setTimeout(r, 2500))]);
+      attempt.then(() => { if (ma.ready && S.home.loaded && !S.home.maShown) loadHome(); });
+    }
     if (!S.home.loaded) loadHome();
+    loadSidePlaylists();
     if (S.tab === 'library' && !S.lib.items.length) loadLibrary(true);
     // Standard: Das Gerät, auf dem die App läuft, ist das Wiedergabegerät.
     if (!local.active && S.settings.localDefault !== false) startLocal('select');
@@ -619,6 +682,8 @@ function absUrl(u) {
   if (!u) return null;
   noteHost(u);
   if (u.startsWith('/')) return S.auth.hassUrl + u;
+  // Bilder mit Heimnetz-Adresse lädt der Browser über https nicht. Über Home Assistant geht es.
+  if (location.protocol === 'https:' && u.startsWith('http://') && ma.base) return ma.rewriteProxyUrl(u);
   return u;
 }
 function playerPicture(st) {
@@ -730,7 +795,29 @@ function renderMini() {
   const a = p?.attributes || {};
   const show = !!p && !!a.media_title && p.state !== 'off' && p.state !== 'unavailable';
   $('#mini').hidden = !show;
-  if (!show) return;
+  // Knöpfe der Kopfleiste (großer Bildschirm, dort ist die Leiste immer sichtbar)
+  const off = !p || p.state === 'unavailable';
+  $('#miniPlay').disabled = off;
+  $('#miniPrev').disabled = off || !supports(p, F.PREVIOUS_TRACK);
+  const sh = $('#miniShuffle');
+  sh.disabled = off || !supports(p, F.SHUFFLE_SET);
+  sh.classList.toggle('active', !!a.shuffle);
+  const rp = $('#miniRepeat');
+  rp.disabled = off || !supports(p, F.REPEAT_SET);
+  rp.classList.toggle('active', a.repeat === 'all' || a.repeat === 'one');
+  setIcon(rp, a.repeat === 'one' ? 'repeatOne' : 'repeat');
+  const mv = $('#miniVolume');
+  mv.disabled = off || !supports(p, F.VOLUME_SET);
+  if (!S.draggingVolume && typeof a.volume_level === 'number') mv.value = Math.round(a.volume_level * 100);
+  $('#miniQueue').disabled = off;
+  if (!show) {
+    $('#miniTitle').textContent = 'Nichts in der Wiedergabe';
+    $('#miniSub').textContent = p ? playerName(p) : '';
+    setImg($('#miniArt'), $('#miniArtPh'), null);
+    setIcon($('#miniPlay'), 'play');
+    $('#miniNext').disabled = true;
+    return;
+  }
   $('#miniTitle').textContent = a.media_title;
   const sub = $('#miniSub');
   sub.textContent = [a.media_artist, groupLabel(p)].filter(Boolean).join(' · ');
@@ -814,7 +901,48 @@ async function openQueue() {
   if (req !== S.queue.req || sheetKind() !== 'queue') return;
   const body = el('div', {});
   const a = currentPlayer()?.attributes || {};
-  if (!q || !q.items) {
+  // Vollständige Liste gibt es nur direkt von Music Assistant.
+  let full = null;
+  const queueId = q?.queue_id || a.active_queue;
+  if (q && q.items && queueId) {
+    try {
+      full = await ma.send('player_queues/items', { queue_id: queueId, limit: 100, offset: Math.max(0, q.current_index || 0) });
+      if (!Array.isArray(full) || !full.length) full = null;
+    } catch { full = null; }
+    if (req !== S.queue.req || sheetKind() !== 'queue') return;
+  }
+  if (full) {
+    const pos = (q.current_index || 0) + 1;
+    body.append(el('p', { class: 'hint' }, [`Titel ${pos} von ${q.items}`, q.shuffle_enabled ? 'Zufall an' : null].filter(Boolean).join(' · ')));
+    const list = el('div', { class: 'list', id: 'queueList' });
+    full.forEach((qi, i) => {
+      const mi = qi.media_item || {};
+      const artists = (mi.artists || []).map((x) => x.name).filter(Boolean).join(', ');
+      const img = ma.imageUrl(qi.image || mi.image || (mi.metadata?.images || [])[0]);
+      list.append(el('div', { class: 'row' + (i === 0 ? ' playing' : '') },
+        el('button', {
+          class: 'row-main',
+          onclick: async () => {
+            if (i === 0) return;
+            try { await ma.send('player_queues/play_index', { queue_id: queueId, index: qi.queue_item_id }); } catch (e) { toast('Fehler: ' + e.message, true); }
+          },
+        },
+        artNode(img, 'track', 'row-art'),
+        el('span', { class: 'row-text' },
+          el('span', { class: 'row-name' }, mi.name || qi.name || 'Unbekannt'),
+          el('span', { class: 'row-sub' }, [i === 0 ? 'Läuft gerade' : null, artists, qi.duration ? formatTime(qi.duration) : null].filter(Boolean).join(' · ')),
+        )),
+        i === 0 ? null : el('button', {
+          class: 'icon-btn', 'aria-label': `${mi.name || qi.name} aus der Warteschlange entfernen`,
+          onclick: async () => {
+            try { await ma.send('player_queues/delete_item', { queue_id: queueId, item_id_or_index: qi.queue_item_id }); openQueue(); } catch (e) { toast('Fehler: ' + e.message, true); }
+          },
+        }, icon('close', 'small')),
+      ));
+    });
+    body.append(list);
+    if (q.items - pos + 1 > full.length) body.append(el('p', { class: 'hint' }, `… und ${q.items - pos + 1 - full.length} weitere Titel`));
+  } else if (!q || !q.items) {
     body.append(el('p', { class: 'empty' }, 'Die Warteschlange ist leer.'));
   } else {
     const pos = typeof q.current_index === 'number' ? q.current_index + 1 : null;
@@ -836,8 +964,10 @@ async function openQueue() {
       onclick: async () => { await svc('clear_playlist'); toast('Warteschlange geleert'); openQueue(); },
     }, icon('trash', 'small'), 'Leeren') : null,
   ));
-  body.append(el('p', { class: 'hint' },
-    'Home Assistant gibt nur den aktuellen und den nächsten Titel weiter. Die ganze Liste zum Umsortieren zeigt die Oberfläche von Music Assistant.'));
+  if (!full && q && q.items) {
+    body.append(el('p', { class: 'hint' },
+      'Home Assistant gibt nur den aktuellen und den nächsten Titel weiter. Die ganze Liste erscheint hier, wenn du als Admin angemeldet bist und die App aus Home Assistant geöffnet ist.'));
+  }
   openSheet(`Warteschlange · ${playerName(p)}`, body, 'queue');
 }
 
@@ -873,6 +1003,23 @@ function fromMa(item) {
     expandable: isExpandable(item.media_type),
   };
 }
+
+/** Eintrag aus der Schnittstelle von Music Assistant in einheitliche Form bringen */
+function fromMaApi(item) {
+  if (!item || !item.uri || !item.name || item.media_type === 'folder' || item.media_type === 'genre') return null;
+  const images = item.metadata?.images || [];
+  const img = item.image || images.find((i) => i.type === 'thumb') || images[0] || item.album?.image || null;
+  return {
+    uri: item.uri,
+    name: item.name + (item.version && item.media_type === 'track' ? ` (${item.version})` : ''),
+    media_type: item.media_type,
+    image: ma.imageUrl(img),
+    subtitle: itemSubtitle(item),
+    favorite: !!item.favorite,
+    expandable: isExpandable(item.media_type),
+  };
+}
+const fromMaList = (items) => (items || []).map(fromMaApi).filter(Boolean);
 
 /** Eintrag aus browse_media in einheitliche Form bringen */
 function fromBrowse(child) {
@@ -988,11 +1135,16 @@ async function loadHome() {
   const req = ++S.home.req;
   S.home.loaded = true;
   const sections = {};
-  const nodes = [el('p', { class: 'greeting' }, greeting())];
+  const maTop = el('div', { class: 'ma-rows', id: 'maTop' });   // Empfehlungen der Musikdienste
+  const maLib = el('div', { class: 'ma-rows', id: 'maLib' });   // Reihen aus der eigenen Mediathek
+  S.home.maShown = false;
+  const nodes = [el('p', { class: 'greeting' }, greeting()), maTop];
   for (const sh of HOME_SHELVES) {
     const sec = el('section', { class: 'home-section', dataset: { shelf: sh.key } });
     if (sh.hero) {
-      sec.append(el('div', { class: 'hero-row' }, Array.from({ length: 2 }, () => el('div', { class: 'hero skeleton' }))));
+      sec.append(
+        shelfHead('Deine Playlists', () => showInLibrary(sh.type, sh.order)),
+        el('div', { class: 'hero-row' }, Array.from({ length: 2 }, () => el('div', { class: 'hero skeleton' }))));
     } else {
       sec.append(
         shelfHead(sh.title, () => (sh.type === 'radio' ? setTab('radio') : showInLibrary(sh.type, sh.order))),
@@ -1001,8 +1153,10 @@ async function loadHome() {
     }
     sections[sh.key] = sec;
     nodes.push(sec);
+    if (sh.hero) nodes.push(maLib);
   }
   box.replaceChildren(...nodes);
+  loadMaRows(req, maTop, maLib, sections);
 
   let filled = 0;
   await Promise.all(HOME_SHELVES.map(async (sh) => {
@@ -1012,12 +1166,61 @@ async function loadHome() {
     const sec = sections[sh.key];
     if (!items.length) { sec.remove(); return; }
     filled++;
-    if (sh.hero) sec.replaceChildren(el('div', { class: 'hero-row' }, items.map(heroNode)));
-    else sec.lastElementChild.replaceChildren(...items.map(cardNode));
+    sec.lastElementChild.replaceChildren(...items.map(sh.hero ? heroNode : cardNode));
   }));
   if (req === S.home.req && !filled) {
     box.append(el('p', { class: 'empty' }, 'Deine Mediathek ist noch leer. Über „Suchen“ findest du Musik bei deinen Musikdiensten.'));
   }
+}
+
+/** Empfehlungen und Mediathek-Reihen direkt von Music Assistant (falls erreichbar). */
+async function loadMaRows(req, maTop, maLib, sections) {
+  let rows;
+  try {
+    rows = await ma.send('music/recommendations');
+  } catch { return; } // ohne diesen Draht bleibt die Startseite bei den Reihen aus Home Assistant
+  if (req !== S.home.req || !Array.isArray(rows)) return;
+  rows = rows.filter((r) => r && r.item_id && r.provider && r.enabled_by_default !== false);
+  const external = rows.filter((r) => r.provider !== 'recommendations').slice(0, 6);
+  const library = rows.filter((r) => r.provider === 'recommendations' && r.item_id !== 'in_progress').slice(0, 8);
+  let libraryShown = 0;
+  await Promise.all([...external, ...library].map(async (row) => {
+    const isLib = row.provider === 'recommendations';
+    const title = (isLib && MA_ROW_TITLE[row.item_id]) || row.name;
+    const sec = el('section', { class: 'home-section', dataset: { row: `${row.provider}/${row.item_id}` }, hidden: true },
+      el('div', { class: 'shelf-head' }, el('h2', { class: 'shelf-title' }, title)),
+      el('div', { class: 'shelf' }));
+    (isLib ? maLib : maTop).append(sec); // Reihenfolge wie vom Server geliefert
+    let items = fromMaList(row.items);
+    if (!items.length) {
+      try { items = fromMaList(await ma.send('music/recommendations/items', { provider: row.provider, item_id: row.item_id })); } catch { items = []; }
+    }
+    if (req !== S.home.req) return;
+    if (!items.length) { sec.remove(); return; }
+    // Die erste Empfehlungs-Reihe eines Musikdienstes bekommt die großen Kacheln.
+    if (!isLib && row === external[0]) {
+      sec.lastElementChild.className = 'hero-row';
+      sec.lastElementChild.replaceChildren(...items.slice(0, 12).map(heroNode));
+    } else {
+      sec.lastElementChild.replaceChildren(...items.slice(0, 20).map(cardNode));
+    }
+    sec.hidden = false;
+    S.home.maShown = true;
+    if (isLib && ++libraryShown === 1) {
+      for (const key of HOME_SHELVES_COVERED_BY_MA) sections[key]?.remove();
+    }
+  }));
+}
+
+/** Playlists in der Seitenleiste (großer Bildschirm) */
+async function loadSidePlaylists() {
+  const box = $('#sidePlaylists');
+  if (!S.configEntryId || !S.conn?.open) return;
+  try {
+    const items = await fetchLibrary({ media_type: 'playlist', order_by: 'name', limit: 100 });
+    box.replaceChildren(...items.map((item) => el('button', { class: 'side-item', title: item.name, onclick: () => { closeNow(); S.stack = []; openDetail(item); } },
+      artNode(item.image, 'playlist', 'side-art'), el('span', {}, item.name))));
+  } catch { /* Seitenleiste bleibt ohne Playlists */ }
 }
 
 function showInLibrary(type, order) {
@@ -1113,8 +1316,11 @@ async function runSearch() {
   const s = S.search;
   s.q = q;
   const req = ++s.req;
+  $('#browse').hidden = q.length >= 2;
+  $('#searchTypes').hidden = q.length < 2 && s.type === 'all';
   if (q.length < 2) {
-    box.replaceChildren(el('p', { class: 'empty' }, 'Suche in deiner Mediathek und bei deinen Musikdiensten.'));
+    box.replaceChildren();
+    renderBrowse();
     return;
   }
   if (!S.configEntryId) { box.replaceChildren(noConfigEntryNode()); return; }
@@ -1139,6 +1345,87 @@ async function runSearch() {
   }
 }
 
+// ---------- Stöbern nach Musikrichtung ----------
+function renderBrowse() {
+  const box = $('#browse');
+  if (box.childElementCount) return;
+  box.append(
+    el('h2', { class: 'shelf-title plain' }, 'Stöbern'),
+    el('div', { class: 'genre-grid' }, GENRES.map((g) => el('button', {
+      class: 'genre-tile', style: `background: linear-gradient(135deg, ${g.c1}, ${g.c2})`,
+      onclick: () => openDetail(g),
+    }, el('span', {}, g.name)))),
+  );
+}
+
+/** Kennung der Musikrichtung in Music Assistant (für Inhalte aus der eigenen Mediathek), falls vorhanden */
+async function maGenreId(genre) {
+  if (!S.maGenres) {
+    const list = await ma.send('music/genres/library_items', { limit: 500 });
+    S.maGenres = new Map();
+    for (const g of list || []) {
+      for (const key of [g.name, g.translation_key, g.sort_name]) if (key) S.maGenres.set(normGenre(key), g.item_id);
+    }
+  }
+  for (const key of [genre.name, genre.query, ...genre.aliases]) {
+    const id = S.maGenres.get(normGenre(key));
+    if (id != null) return id;
+  }
+  return null;
+}
+
+const GENRE_ROW_TITLE = { artists: 'Künstler', albums: 'Alben', tracks: 'Titel', playlists: 'Playlists', radios: 'Radiosender', podcasts: 'Podcasts', audiobooks: 'Hörbücher' };
+
+async function renderGenre(genre) {
+  const box = $('#detail');
+  const mine = el('div', {});       // aus der eigenen Mediathek (über Music Assistant)
+  const catalog = el('div', {}, el('div', { class: 'more' }, el('div', { class: 'spinner', 'aria-label': 'Lädt' })));
+  box.replaceChildren(
+    el('div', { class: 'genre-head', style: `background: linear-gradient(135deg, ${genre.c1}, ${genre.c2})` },
+      el('span', { class: 'detail-type' }, 'Musikrichtung'), el('h2', { class: 'detail-title' }, genre.name)),
+    catalog, mine,
+  );
+  const still = () => S.stack[S.stack.length - 1] === genre;
+
+  // 1) Bei den Musikdiensten: Suche nach dem Namen der Richtung
+  (async () => {
+    try {
+      const r = await S.conn.callService('music_assistant', 'search',
+        { config_entry_id: S.configEntryId, name: genre.query, limit: 14, library_only: false }, undefined, true);
+      if (!still()) return;
+      const res = r?.response || {};
+      const nodes = [];
+      for (const [key, label] of [['playlists', 'Playlists'], ['artists', 'Beispiel-Interpreten'], ['albums', 'Alben'], ['radio', 'Radiosender'], ['tracks', 'Titel']]) {
+        const items = (res[key] || []).map(fromMa);
+        if (!items.length) continue;
+        nodes.push(el('h3', { class: 'section-title' }, label));
+        nodes.push(key === 'tracks' ? itemsNode(items.slice(0, 8), true) : el('div', { class: 'shelf' }, items.map(cardNode)));
+      }
+      if (nodes.length) nodes.push(el('p', { class: 'hint' }, `Das sind die Treffer deiner Musikdienste zum Begriff „${genre.query}“.`));
+      catalog.replaceChildren(...(nodes.length ? nodes : [el('p', { class: 'empty' }, 'Dazu wurde bei deinen Musikdiensten nichts gefunden.')]));
+    } catch (e) {
+      if (still()) catalog.replaceChildren(el('p', { class: 'empty' }, 'Suche fehlgeschlagen: ' + e.message));
+    }
+  })();
+
+  // 2) Aus der eigenen Mediathek, nach Musikrichtung sortiert (nur mit direktem Draht zu Music Assistant)
+  try {
+    const id = await maGenreId(genre);
+    if (id == null || !still()) return;
+    const rows = await ma.send('music/genres/overview', { item_id: String(id), limit: 20 });
+    if (!still()) return;
+    const nodes = [];
+    for (const row of rows || []) {
+      const items = fromMaList(row.items);
+      if (!items.length) continue;
+      const label = GENRE_ROW_TITLE[row.translation_key] || GENRE_ROW_TITLE[String(row.item_id || '').split('_').pop()] || row.name;
+      nodes.push(el('h3', { class: 'section-title' }, `${label} aus deiner Mediathek`));
+      nodes.push(el('div', { class: 'shelf' }, items.map(cardNode)));
+    }
+    mine.replaceChildren(...nodes);
+  } catch { /* ohne Draht zu Music Assistant gibt es nur die Treffer der Musikdienste */ }
+}
+
 // ---------- Detailansicht ----------
 function openDetail(item) {
   S.stack.push(item);
@@ -1151,6 +1438,7 @@ async function renderDetail() {
   const item = S.stack[S.stack.length - 1];
   const box = $('#detail');
   if (!item) return;
+  if (item.kind === 'genre') { renderGenre(item); return; }
   const browseEntity = [currentPlayer(), ...S.players].find((p) => p && p.state !== 'unavailable')?.entity_id;
   const head = el('div', { class: 'detail-head' },
     artNode(item.image, item.media_type, 'detail-art' + (item.media_type === 'artist' ? ' round' : '')),
@@ -1206,18 +1494,18 @@ async function renderDetail() {
 }
 
 // ---------- Navigation ----------
-function setTab(tab) {
+function setTab(tab, { keepFocus = false } = {}) {
   const again = S.tab === tab && !S.stack.length;
   S.tab = tab;
   S.stack = [];
-  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab || (t.id === 'sideBrowse' && tab === 'search')));
   showView();
   if (tab === 'home' && (again || !S.home.loaded)) loadHome();
   if (tab === 'radio' && (again || !S.radio.loaded)) loadRadio();
   if (tab === 'library' && !S.lib.items.length && !S.lib.loading) loadLibrary(true);
   if (tab === 'search') {
     if (!$('#searchResults').childElementCount) runSearch();
-    setTimeout(() => $('#searchInput').focus(), 50);
+    if (!keepFocus && !matchMedia('(min-width: 900px)').matches) setTimeout(() => $('#searchInput').focus(), 50);
   }
   window.scrollTo(0, 0);
 }
@@ -1312,6 +1600,8 @@ function openSettings() {
     el('div', { class: 'kv' }, el('span', {}, 'Anmeldung'), el('span', {}, S.auth?.type === 'token' ? 'Zugriffstoken' : 'Home-Assistant-Konto')),
     el('div', { class: 'kv' }, el('span', {}, 'Music-Assistant-Player'), el('span', {}, String(S.players.length))),
     el('div', { class: 'kv' }, el('span', {}, 'Dieses Gerät als Lautsprecher'), el('span', {}, localStatus)),
+    el('div', { class: 'kv' }, el('span', {}, 'Empfehlungen und volle Warteschlange'),
+      el('span', {}, ma.ready ? `verbunden (Music Assistant ${ma.serverVersion})` : (ma.error || (ingress.possible ? 'nicht verbunden' : 'nur wenn die App aus Home Assistant geöffnet ist')))),
     el('label', {}, 'Name dieses Geräts (so erscheint es in Music Assistant und Home Assistant)'),
     nameInput,
     el('label', {}, 'Adresse von Music Assistant (nur falls „Dieses Gerät“ keine Verbindung findet)'),
@@ -1354,6 +1644,9 @@ function openSettings() {
         await logout(a);
         S.home.loaded = false;
         S.radio.loaded = false;
+        ma.close();
+        ingress.reset();
+        S.maGenres = null;
         showLogin();
       },
     }, icon('logout', 'small'), 'Abmelden'),
@@ -1408,6 +1701,23 @@ function bindUI() {
   $('#prevBtn').addEventListener('click', () => svc('media_previous_track'));
   $('#nextBtn').addEventListener('click', () => svc('media_next_track'));
   $('#miniNext').addEventListener('click', () => svc('media_next_track'));
+  $('#miniPrev').addEventListener('click', () => svc('media_previous_track'));
+  $('#miniShuffle').addEventListener('click', () => $('#shuffleBtn').click());
+  $('#miniRepeat').addEventListener('click', () => $('#repeatBtn').click());
+  $('#miniQueue').addEventListener('click', openQueue);
+
+  // Seitenleiste (großer Bildschirm)
+  $('#sideBrowse').addEventListener('click', () => {
+    $('#searchInput').value = ''; $('#sideSearch').value = '';
+    setTab('search'); runSearch();
+  });
+  const sideSearch = debounce(() => {
+    $('#searchInput').value = $('#sideSearch').value;
+    if (S.tab !== 'search' || S.stack.length) setTab('search', { keepFocus: true });
+    runSearch();
+  }, 350);
+  $('#sideSearch').addEventListener('input', sideSearch);
+  document.querySelectorAll('.side-item[data-lib]').forEach((b) => b.addEventListener('click', () => showInLibrary(b.dataset.lib, b.dataset.order || 'name')));
   $('#shuffleBtn').addEventListener('click', () => svc('shuffle_set', { shuffle: !currentPlayer()?.attributes?.shuffle }));
   $('#repeatBtn').addEventListener('click', () => {
     const next = { off: 'all', all: 'one', one: 'off' }[currentPlayer()?.attributes?.repeat || 'off'] || 'off';
@@ -1429,6 +1739,11 @@ function bindUI() {
     sendVol();
     setTimeout(() => { S.draggingVolume = false; }, 800);
   });
+  // zweiter Lautstärkeregler in der Kopfleiste: bedient denselben Regler
+  const mini = $('#miniVolume');
+  for (const type of ['input', 'change']) {
+    mini.addEventListener(type, () => { vol.value = mini.value; vol.dispatchEvent(new Event(type)); });
+  }
 
   $('#progressBar').addEventListener('click', seekFromEvent);
   $('#progressBar').addEventListener('keydown', (e) => {

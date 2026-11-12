@@ -51,13 +51,13 @@ const toWs = (baseUrl) => baseUrl.replace(/^http/i, 'ws') + '/sendspin';
 export class LocalPlayer extends EventTarget {
   /**
    * @param {object} o
-   * @param {() => import('./ha.js').HAConnection|null} o.getConn  aktuelle HA-Verbindung
+   * @param {import('./ingress.js').Ingress} o.ingress  Zugang über Home Assistant
    * @param {() => string} o.getHassUrl
    * @param {() => string[]} o.getHostHints  mögliche Adressen des Music-Assistant-Servers
    */
-  constructor({ getConn, getHassUrl, getHostHints }) {
+  constructor({ ingress, getHassUrl, getHostHints }) {
     super();
-    this.getConn = getConn;
+    this.ingress = ingress;
     this.getHassUrl = getHassUrl;
     this.getHostHints = getHostHints;
     this.state = 'off';
@@ -66,8 +66,6 @@ export class LocalPlayer extends EventTarget {
     this.name = '';
     this.player = null;
     this.playing = false;
-    this.ingress = null;  // { entry, session }
-    this.ingressTimer = null;
     this.needsUnlock = true;
     this._starting = null;
   }
@@ -128,8 +126,6 @@ export class LocalPlayer extends EventTarget {
   }
 
   _cleanup() {
-    clearInterval(this.ingressTimer);
-    this.ingressTimer = null;
     if (this.player) {
       try { this.player.disconnect('user_request'); } catch { /* egal */ }
       this.player = null;
@@ -140,7 +136,7 @@ export class LocalPlayer extends EventTarget {
 
   /** Nach Standby o. Ä.: Verbindung prüfen. Die Bibliothek verbindet selbst neu; hier nur der Ingress-Cookie. */
   async refresh() {
-    if (this.route === 'Home Assistant' && this.active) await this._renewIngressSession().catch(() => {});
+    if (this.route === 'Home Assistant' && this.active) await this.ingress.renew().catch(() => {});
     this.needsUnlock = true;
   }
 
@@ -159,14 +155,10 @@ export class LocalPlayer extends EventTarget {
     }
 
     // Über Home Assistant (Ingress). Der Cookie gilt nur, wenn die App von Home Assistant selbst kommt.
-    if (new URL(hassUrl).origin === location.origin) {
+    if (this.ingress.possible) {
       try {
-        const base = await this._prepareIngress();
-        if (await probe(toWs(base), 6000)) {
-          this.route = 'Home Assistant';
-          this.ingressTimer = setInterval(() => this._renewIngressSession().catch(() => {}), 60_000);
-          return base;
-        }
+        const base = await this.ingress.prepare();
+        if (await probe(toWs(base), 6000)) { this.route = 'Home Assistant'; return base; }
         errors.push('Verbindung über Home Assistant wurde abgelehnt');
       } catch (e) {
         errors.push('Über Home Assistant nicht möglich: ' + (e.message || e));
@@ -175,46 +167,5 @@ export class LocalPlayer extends EventTarget {
       errors.push('Die App muss dafür direkt aus Home Assistant geöffnet werden (/local/musik/)');
     }
     throw new Error(errors.join(' · ') || 'Kein Weg zu Music Assistant gefunden');
-  }
-
-  _supervisor(endpoint, method = 'get', data = undefined) {
-    const conn = this.getConn();
-    if (!conn) throw new Error('Keine Verbindung zu Home Assistant');
-    const msg = { type: 'supervisor/api', endpoint, method };
-    if (data) msg.data = data;
-    return conn.send(msg, 10_000);
-  }
-
-  async _prepareIngress() {
-    if (!this.ingress) {
-      let list;
-      try {
-        list = await this._supervisor('/addons');
-      } catch (e) {
-        throw new Error(/unauthorized|admin/i.test(e.message) ? 'dafür ist ein Admin-Konto nötig' : e.message);
-      }
-      const addon = (list.addons || []).find((a) => /(^|_)music_assistant(_beta|_nightly|_dev)?$/.test(a.slug) && a.state === 'started')
-        || (list.addons || []).find((a) => /music.?assistant/i.test(a.name || ''));
-      if (!addon) throw new Error('die Music-Assistant-App wurde in Home Assistant nicht gefunden');
-      const info = await this._supervisor(`/addons/${addon.slug}/info`);
-      if (!info.ingress_entry) throw new Error('Music Assistant bietet keinen Zugang über Home Assistant an');
-      this.ingress = { entry: info.ingress_entry, session: null };
-    }
-    await this._renewIngressSession(true);
-    return this.getHassUrl() + this.ingress.entry;
-  }
-
-  async _renewIngressSession(forceNew = false) {
-    if (!this.ingress) return;
-    if (!forceNew && this.ingress.session) {
-      try {
-        await this._supervisor('/ingress/validate_session', 'post', { session: this.ingress.session });
-        return;
-      } catch { /* abgelaufen → neue Sitzung */ }
-    }
-    const r = await this._supervisor('/ingress/session', 'post');
-    this.ingress.session = r.session;
-    // genauso wie die Oberfläche von Home Assistant selbst
-    document.cookie = `ingress_session=${r.session};path=/api/hassio_ingress/;SameSite=Strict${location.protocol === 'https:' ? ';Secure' : ''}`;
   }
 }

@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=2.1.1">
+  <link rel="stylesheet" href="style.css?v=2.2.0">
   <title>Musik</title>
 </head>
 <body>
@@ -54,10 +54,24 @@
   <div id="app" class="app" hidden>
     <nav class="tabbar" aria-label="Bereiche">
       <div class="brand"><img src="icons/icon.svg" alt=""><span>Musik</span></div>
+      <!-- nur in der Seitenleiste (großer Bildschirm) -->
+      <div class="side-only side-search">
+        <input id="sideSearch" type="search" placeholder="Suchen" aria-label="Suchen" enterkeyhint="search">
+      </div>
       <button class="tab active" data-tab="home"><span class="ico" data-icon="home"></span><span>Startseite</span></button>
+      <button class="tab side-only" id="sideBrowse"><span class="ico" data-icon="grid"></span><span>Entdecken</span></button>
       <button class="tab" data-tab="radio"><span class="ico" data-icon="broadcast"></span><span>Radio</span></button>
       <button class="tab" data-tab="library"><span class="ico" data-icon="library"></span><span>Mediathek</span></button>
-      <button class="tab" data-tab="search"><span class="ico" data-icon="search"></span><span>Suchen</span></button>
+      <button class="tab mobile-only" data-tab="search"><span class="ico" data-icon="search"></span><span>Suchen</span></button>
+      <div class="side-only side-group">
+        <button class="side-item" data-lib="album" data-order="timestamp_added_desc"><span class="ico small" data-icon="clock"></span><span>Zuletzt hinzugefügt</span></button>
+        <button class="side-item" data-lib="artist"><span class="ico small" data-icon="artist"></span><span>Künstler</span></button>
+        <button class="side-item" data-lib="album"><span class="ico small" data-icon="album"></span><span>Alben</span></button>
+        <button class="side-item" data-lib="track"><span class="ico small" data-icon="note"></span><span>Titel</span></button>
+        <div class="side-label">Playlists</div>
+        <button class="side-item" data-lib="playlist"><span class="ico small" data-icon="grid"></span><span>Alle Playlists</span></button>
+        <div id="sidePlaylists"></div>
+      </div>
     </nav>
 
     <div class="content">
@@ -93,6 +107,7 @@
                  aria-label="Suche" enterkeyhint="search">
           <div class="chips" id="searchTypes" aria-label="Suchen in"></div>
           <div id="searchResults"></div>
+          <div id="browse"></div>
         </section>
 
         <!-- Bibliothek -->
@@ -105,6 +120,7 @@
               <option value="timestamp_added_desc">Zuletzt hinzugefügt</option>
               <option value="last_played_desc">Zuletzt gespielt</option>
               <option value="play_count_desc">Meist gespielt</option>
+              <option value="year_desc">Erscheinungsjahr</option>
               <option value="random">Zufällig</option>
             </select>
             <button id="libFav" class="chip" aria-pressed="false"><span class="ico small" data-icon="heart"></span> Favoriten</button>
@@ -131,9 +147,17 @@
           <span id="miniSub" class="mini-sub"></span>
         </span>
       </button>
-      <button id="miniDevice" class="icon-btn" aria-label="Wiedergabegerät wählen"><span class="ico" data-icon="speaker"></span></button>
-      <button id="miniPlay" class="icon-btn" aria-label="Wiedergabe/Pause"><span class="ico" data-icon="play"></span></button>
-      <button id="miniNext" class="icon-btn mini-next" aria-label="Weiter"><span class="ico" data-icon="next"></span></button>
+      <button id="miniShuffle" class="icon-btn side-only mini-ctl" aria-label="Zufallswiedergabe"><span class="ico small" data-icon="shuffle"></span></button>
+      <button id="miniPrev" class="icon-btn side-only mini-ctl" aria-label="Zurück"><span class="ico" data-icon="prev"></span></button>
+      <button id="miniPlay" class="icon-btn mini-ctl" aria-label="Wiedergabe/Pause"><span class="ico" data-icon="play"></span></button>
+      <button id="miniNext" class="icon-btn mini-next mini-ctl" aria-label="Weiter"><span class="ico" data-icon="next"></span></button>
+      <button id="miniRepeat" class="icon-btn side-only mini-ctl" aria-label="Wiederholen"><span class="ico small" data-icon="repeat"></span></button>
+      <span class="side-only mini-vol">
+        <span class="ico small" data-icon="volume"></span>
+        <input id="miniVolume" type="range" min="0" max="100" step="1" value="0" aria-label="Lautstärke">
+      </span>
+      <button id="miniDevice" class="icon-btn mini-right" aria-label="Wiedergabegerät wählen"><span class="ico" data-icon="speaker"></span></button>
+      <button id="miniQueue" class="icon-btn side-only mini-right" aria-label="Warteschlange"><span class="ico" data-icon="queue"></span></button>
       <div id="miniProgress" class="mini-progress"></div>
     </div>
   </div>
@@ -208,6 +232,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script type="module" src="app.js?v=2.1.1"></script>
+  <script type="module" src="app.js?v=2.2.0"></script>
 </body>
 </html>

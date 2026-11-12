@@ -93,6 +93,7 @@ const LIB = {
   radio: [
     { media_type: 'radio', uri: 'tunein://radio/s44910', name: "Queen's Radio", version: '', image: img('#393'), favorite: false },
     { media_type: 'radio', uri: 'tunein://radio/s1', name: 'Antenne Vorarlberg', version: '', image: img('#d60'), favorite: false },
+    { media_type: 'radio', uri: 'tunein://radio/s2', name: 'Rock Antenne', version: '', image: img('#a11'), favorite: false },
   ],
   podcast: [], audiobook: [],
 };
@@ -281,6 +282,13 @@ export function startMock({ port = 8123, quiet = false } = {}) {
       res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
       return res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#e83"/><circle cx="5" cy="5" r="3" fill="#fff"/></svg>');
     }
+    if (url.pathname.startsWith(`${INGRESS_ENTRY}/imageproxy/`)) {
+      // Bilder von Music Assistant über Home Assistant: nur mit gültiger Ingress-Sitzung
+      if (!hasIngressSession(req)) { res.writeHead(401); return res.end(); }
+      st.calls.push({ imageproxy: url.pathname.split('/').pop(), size: url.searchParams.get('size') });
+      res.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+      return res.end('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#0a7"/><rect x="2" y="2" width="6" height="6" fill="#fff8"/></svg>');
+    }
     if (url.pathname.startsWith('/local/musik/')) {
       const rel = url.pathname.slice('/local/musik/'.length) || 'index.html';
       if (rel === 'index.html') st.indexRequests = (st.indexRequests || 0) + 1;
@@ -338,6 +346,69 @@ export function startMock({ port = 8123, quiet = false } = {}) {
     });
   });
 
+  // --- WebSocket: Schnittstelle von Music Assistant über Ingress (Empfehlungen, Musikrichtungen, Warteschlange) ---
+  // Format wie in Music Assistant 2.10: erst Server-Angaben, dann {message_id, command, args} → {message_id, result}.
+  const maItem = (type, id, name, extra = {}) => ({
+    item_id: String(id), provider: 'library', name, version: '', media_type: type, uri: `library://${type}/${id}`, favorite: false,
+    metadata: { images: [{ type: 'thumb', path: `/data/${id}.jpg`, provider: 'builtin', remotely_accessible: false, proxy_id: `px${id}` }] }, ...extra,
+  });
+  const MA_ROWS = [
+    { item_id: 'fuer_dich', provider: 'apple_music--TEST', name: 'Für dich zusammengestellt', media_type: 'folder', enabled_by_default: true, items: [] },
+    { item_id: 'recently_played', provider: 'recommendations', name: 'Recently played', translation_key: 'recently_played', media_type: 'folder', enabled_by_default: true, items: [] },
+    { item_id: 'random_albums', provider: 'recommendations', name: 'Random albums', translation_key: 'random_albums', media_type: 'folder', enabled_by_default: false, items: [] },
+    { item_id: 'forgotten_albums', provider: 'recommendations', name: 'Forgotten Albums', translation_key: 'forgotten_albums', media_type: 'folder', enabled_by_default: true, items: [] },
+    { item_id: 'leer', provider: 'apple_music--TEST', name: 'Leere Reihe', media_type: 'folder', enabled_by_default: true, items: [] },
+  ];
+  const MA_ROW_ITEMS = {
+    fuer_dich: [
+      { item_id: 'ra.1', provider: 'apple_music--TEST', name: 'Patrics Sender', version: '', media_type: 'playlist', uri: 'apple_music--TEST://playlist/ra.1', favorite: false,
+        metadata: { images: [{ type: 'thumb', path: 'https://example.invalid/sender.jpg', provider: 'apple_music', remotely_accessible: true }] } },
+      maItem('playlist', 901, 'Energie'), maItem('playlist', 902, 'Chill-Mix'),
+      { item_id: 'x', provider: 'library', name: 'Ordner', media_type: 'folder', uri: 'library://folder/x' },
+    ],
+    recently_played: [maItem('album', 4356, '1000 Jahre EAV', { artists: [{ name: 'EAV' }] }), maItem('track', 18335, '50ft Queenie', { artists: [{ name: 'PJ Harvey' }], album: { name: 'Rid of Me' } })],
+    forgotten_albums: [maItem('album', 394, 'Innuendo', { artists: [{ name: 'Queen' }] })],
+    leer: [],
+  };
+  const MA_GENRES = [{ item_id: '7', provider: 'library', name: 'Rock', translation_key: 'rock', media_type: 'genre' }, { item_id: '9', provider: 'library', name: 'Hip Hop', translation_key: 'hip_hop', media_type: 'genre' }];
+  const maQueueItem = (i) => ({
+    queue_id: 'q', queue_item_id: `qi${i}`, name: `Künstler ${i} - Titel ${i}`, duration: 180 + i, sort_index: i,
+    media_item: { item_id: String(i), provider: 'library', name: `Titel ${i}`, media_type: 'track', uri: `library://track/${i}`, artists: [{ name: `Künstler ${i}` }] },
+    image: { type: 'thumb', path: `/q/${i}.jpg`, provider: 'builtin', remotely_accessible: false, proxy_id: `pq${i}` },
+  });
+  const hasIngressSession = (req) => st.ingressSessions.has(/(?:^|;\s*)ingress_session=([^;]+)/.exec(req.headers.cookie || '')?.[1]);
+  const maWss = new WebSocketServer({ noServer: true });
+  maWss.on('connection', (ws) => {
+    ws.send(JSON.stringify({ server_id: 'test', server_version: '2.10.9', schema_version: 32, min_supported_schema_version: 24, homeassistant_addon: true, onboard_done: true, name: 'Test' }));
+    ws.on('message', (raw) => {
+      const msg = JSON.parse(raw);
+      const a = msg.args || {};
+      st.calls.push({ ma: msg.command, args: a });
+      const ok = (result, partial = false) => ws.send(JSON.stringify({ message_id: msg.message_id, result, ...(partial ? { partial: true } : {}) }));
+      switch (msg.command) {
+        case 'translations/set_locale': return ok({ locale: a.locale });
+        case 'music/recommendations': return ok(MA_ROWS);
+        case 'music/recommendations/items': return ok(MA_ROW_ITEMS[a.item_id] || []);
+        case 'music/genres/library_items': return ok(MA_GENRES);
+        case 'music/genres/overview':
+          return ok(a.item_id === '7' ? [
+            { item_id: 'genre_7_artists', provider: 'library', name: 'Artists', translation_key: 'artists', media_type: 'folder', items: [maItem('artist', 2975, 'Queen')] },
+            { item_id: 'genre_7_albums', provider: 'library', name: 'Albums', translation_key: 'albums', media_type: 'folder', items: [maItem('album', 394, 'Innuendo', { artists: [{ name: 'Queen' }] })] },
+            { item_id: 'genre_7_tracks', provider: 'library', name: 'Tracks', translation_key: 'tracks', media_type: 'folder', items: [] },
+          ] : []);
+        case 'player_queues/items': {
+          // wie der echte Server bei langen Listen: in Teilen geliefert
+          const all = Array.from({ length: Math.max(0, (st.maQueueLength ?? 18) - a.offset) }, (_, i) => maQueueItem(a.offset + i)).slice(0, a.limit);
+          ok(all.slice(0, 5), true);
+          return ok(all.slice(5));
+        }
+        case 'player_queues/play_index': return ok(null);
+        case 'player_queues/delete_item': st.maQueueLength = (st.maQueueLength ?? 18) - 1; return ok(null);
+        default: return ws.send(JSON.stringify({ message_id: msg.message_id, error_code: 1, details: `Unbekannter Befehl ${msg.command}` }));
+      }
+    });
+  });
+
   // --- WebSocket: Sendspin über Ingress (Music Assistant als Abspielziel für „Dieses Gerät“) ---
   // Die Tests ersetzen die echte Sendspin-Bibliothek durch eine Attrappe, die hier nur ihren Namen meldet.
   // Wie Music Assistant erscheint das Gerät danach als neuer media_player in Home Assistant.
@@ -364,8 +435,10 @@ export function startMock({ port = 8123, quiet = false } = {}) {
     const url = new URL(req.url, `http://${req.headers.host}`);
     if (url.pathname === '/api/websocket') return wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));
     if (url.pathname === `${INGRESS_ENTRY}/sendspin`) {
-      const session = /(?:^|;\s*)ingress_session=([^;]+)/.exec(req.headers.cookie || '')?.[1];
-      if (st.ingressSessions.has(session)) return sendspin.handleUpgrade(req, socket, head, (ws) => sendspin.emit('connection', ws, req));
+      if (hasIngressSession(req)) return sendspin.handleUpgrade(req, socket, head, (ws) => sendspin.emit('connection', ws, req));
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+    } else if (url.pathname === `${INGRESS_ENTRY}/ws`) {
+      if (hasIngressSession(req)) return maWss.handleUpgrade(req, socket, head, (ws) => maWss.emit('connection', ws, req));
       socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
     } else {
       socket.write('HTTP/1.1 404 Not Found\r\n\r\n');
@@ -382,7 +455,8 @@ export function startMock({ port = 8123, quiet = false } = {}) {
       close: () => new Promise((r) => {
         for (const s of sockets) s.ws.terminate();
         for (const c of sendspin.clients) c.terminate();
-        wss.close(); sendspin.close(); server.close(r);
+        for (const c of maWss.clients) c.terminate();
+        wss.close(); sendspin.close(); maWss.close(); server.close(r);
       }),
     });
   }));
