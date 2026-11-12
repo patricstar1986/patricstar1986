@@ -2,12 +2,12 @@
 import {
   AuthError, loadAuth, saveAuth, normalizeUrl, servedByHomeAssistant, startLogin,
   finishLoginFromUrl, logout, HAConnection, F, supports, currentPosition, formatTime,
-} from './ha.js?v=2.2.1';
-import { LocalPlayer, defaultDeviceName } from './local.js?v=2.2.1';
-import { Ingress } from './ingress.js?v=2.2.1';
-import { MusicAssistantApi } from './ma.js?v=2.2.1';
+} from './ha.js?v=2.3.0';
+import { LocalPlayer, defaultDeviceName } from './local.js?v=2.3.0';
+import { Ingress } from './ingress.js?v=2.3.0';
+import { MusicAssistantApi } from './ma.js?v=2.3.0';
 
-const APP_VERSION = '2.2.1';
+const APP_VERSION = '2.3.0';
 const PAGE = 50;
 const SETTINGS_KEY = 'musikapp.settings';
 const GROUPING = 524288; // MediaPlayerEntityFeature.GROUPING
@@ -31,6 +31,7 @@ const P = {
   gear: 'M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 00.12-.61l-1.92-3.32a.488.488 0 00-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 00-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 00-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z',
   home: 'M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z',
   forward: 'M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z',
+  infinity: 'M18.6 6.62c-1.44 0-2.8.56-3.77 1.53L12 10.66 10.48 12h.01L7.8 14.39c-.64.64-1.49.99-2.4.99-1.87 0-3.39-1.51-3.39-3.38S3.53 8.62 5.4 8.62c.91 0 1.76.35 2.44 1.03l1.13 1 1.51-1.34L9.22 8.2C8.2 7.18 6.84 6.62 5.4 6.62 2.42 6.62 0 9.04 0 12s2.42 5.38 5.4 5.38c1.44 0 2.8-.56 3.77-1.53l2.83-2.5.01.01L13.52 12h-.01l2.69-2.39c.64-.64 1.49-.99 2.4-.99 1.87 0 3.39 1.51 3.39 3.38s-1.52 3.38-3.39 3.38c-.9 0-1.76-.35-2.44-1.03l-1.14-1.01-1.51 1.34 1.27 1.12c1.02 1.01 2.37 1.57 3.82 1.57 2.98 0 5.4-2.41 5.4-5.38s-2.42-5.37-5.4-5.37z',
   grid: 'M3 3h8v8H3V3zm10 0h8v8h-8V3zM3 13h8v8H3v-8zm10 0h8v8h-8v-8z',
   clock: 'M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67V7z',
   close: 'M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z',
@@ -711,6 +712,7 @@ function openNow() {
   $('#now').hidden = false;
   document.body.classList.add('no-scroll');
   renderNow();
+  refreshAutoplay();
 }
 function closeNow() {
   $('#now').hidden = true;
@@ -770,6 +772,7 @@ function renderNow() {
   pw.setAttribute('aria-label', p?.state === 'off' ? 'Einschalten' : 'Ausschalten');
 
   $('#queueBtn').disabled = off;
+  if ((a.active_queue || '') !== autoplay.queueId && !$('#now').hidden) refreshAutoplay();
   renderDeviceLabels();
   renderProgress();
   updateMediaSession();
@@ -865,6 +868,46 @@ function updateMediaSession() {
   set('previoustrack', () => svc('media_previous_track'));
 }
 
+// ---------- Autoplay: passende Titel weiterspielen, wenn die Warteschlange zu Ende ist ----------
+// Das ist eine Einstellung der Warteschlange in Music Assistant und geht nur über den direkten Draht.
+const autoplay = { queueId: '', enabled: null, req: 0 };
+
+async function refreshAutoplay() {
+  const queueId = currentPlayer()?.attributes?.active_queue || '';
+  const req = ++autoplay.req;
+  if (queueId !== autoplay.queueId) { autoplay.queueId = queueId; autoplay.enabled = null; renderAutoplay(); }
+  if (!queueId || !ingress.possible) return;
+  try {
+    const q = await ma.send('player_queues/get', { queue_id: queueId });
+    if (req !== autoplay.req) return;
+    autoplay.enabled = q ? !!(q.autoplay_enabled ?? q.dont_stop_the_music_enabled) : null;
+  } catch { if (req === autoplay.req) autoplay.enabled = null; }
+  renderAutoplay();
+}
+
+function renderAutoplay() {
+  const btn = $('#autoplayBtn');
+  btn.hidden = autoplay.enabled === null;
+  btn.classList.toggle('active', !!autoplay.enabled);
+  btn.setAttribute('aria-pressed', String(!!autoplay.enabled));
+  btn.setAttribute('aria-label', autoplay.enabled ? 'Autoplay ist an' : 'Autoplay ist aus');
+  btn.title = 'Autoplay: passende Titel weiterspielen, wenn die Warteschlange zu Ende ist';
+}
+
+async function toggleAutoplay() {
+  if (autoplay.enabled === null || !autoplay.queueId) return;
+  const next = !autoplay.enabled;
+  try {
+    await ma.send('player_queues/autoplay', { queue_id: autoplay.queueId, autoplay_enabled: next });
+    autoplay.enabled = next;
+    renderAutoplay();
+    toast(next ? 'Autoplay an: Danach laufen passende Titel weiter.' : 'Autoplay aus: Die Wiedergabe endet mit der Warteschlange.');
+    if (sheetKind() === 'queue') openQueue();
+  } catch (e) {
+    toast('Autoplay konnte nicht umgestellt werden: ' + e.message, true);
+  }
+}
+
 // ---------- Warteschlange ----------
 const queueKey = (p) => [p?.entity_id, p?.attributes?.media_content_id, p?.attributes?.shuffle, p?.attributes?.repeat].join('|');
 
@@ -886,6 +929,7 @@ async function openQueue() {
   if (!p) return;
   const req = ++S.queue.req;
   S.queue.lastKey = queueKey(p);
+  await refreshAutoplay();
   if (sheetKind() !== 'queue') {
     openSheet('Warteschlange', el('div', { class: 'more' }, el('div', { class: 'spinner', 'aria-label': 'Lädt' })), 'queue');
   }
@@ -959,11 +1003,18 @@ async function openQueue() {
   body.append(el('div', { class: 'queue-actions' },
     el('button', { class: 'btn slim', 'aria-pressed': String(!!a.shuffle), onclick: () => svc('shuffle_set', { shuffle: !a.shuffle }) },
       icon('shuffle', 'small'), a.shuffle ? 'Zufall: an' : 'Zufall: aus'),
+    autoplay.enabled === null ? null : el('button', { class: 'btn slim', id: 'queueAutoplay', 'aria-pressed': String(autoplay.enabled), onclick: toggleAutoplay },
+      icon('infinity', 'small'), autoplay.enabled ? 'Autoplay: an' : 'Autoplay: aus'),
     q && q.items ? el('button', {
       class: 'btn slim danger',
       onclick: async () => { await svc('clear_playlist'); toast('Warteschlange geleert'); openQueue(); },
     }, icon('trash', 'small'), 'Leeren') : null,
   ));
+  if (autoplay.enabled !== null) {
+    body.append(el('p', { class: 'hint' }, autoplay.enabled
+      ? 'Autoplay ist an: Wenn die Warteschlange zu Ende ist, spielt Music Assistant passende Titel weiter.'
+      : 'Autoplay ist aus: Die Wiedergabe endet mit dem letzten Titel.'));
+  }
   if (!full && q && q.items) {
     body.append(el('p', { class: 'hint' },
       'Home Assistant gibt nur den aktuellen und den nächsten Titel weiter. Die ganze Liste erscheint hier, wenn du als Admin angemeldet bist und die App aus Home Assistant geöffnet ist.'));
@@ -1097,6 +1148,29 @@ function heroNode(item) {
   );
 }
 
+/**
+ * Waagrechte Reihe mit Pfeilen links und rechts (am PC, sobald die Maus darüber ist).
+ * Gibt die Hülle zurück; die eigentliche Reihe ist das Element mit der Klasse `cls`.
+ */
+function shelfBox(cls, children = []) {
+  const row = el('div', { class: cls }, children);
+  const btn = (dir, label) => el('button', {
+    class: `shelf-arrow ${dir < 0 ? 'left' : 'right'}`, 'aria-label': label, hidden: true,
+    onclick: () => row.scrollBy({ left: dir * Math.max(200, row.clientWidth * 0.85), behavior: 'smooth' }),
+  }, icon(dir < 0 ? 'back' : 'forward'));
+  const left = btn(-1, 'Zurück blättern');
+  const right = btn(1, 'Weiter blättern');
+  const update = () => {
+    left.hidden = row.scrollLeft < 8;
+    right.hidden = row.scrollLeft + row.clientWidth > row.scrollWidth - 8;
+  };
+  row.addEventListener('scroll', update, { passive: true });
+  new MutationObserver(update).observe(row, { childList: true });
+  if (typeof ResizeObserver !== 'undefined') new ResizeObserver(update).observe(row);
+  return el('div', { class: 'shelf-wrap' }, left, row, right);
+}
+const shelfRow = (sec) => sec.querySelector('.shelf, .hero-row');
+
 const shelfHead = (title, onClick) => el('button', { class: 'shelf-head shelf-more', onclick: onClick },
   el('h2', { class: 'shelf-title' }, title), icon('forward'));
 
@@ -1144,11 +1218,11 @@ async function loadHome() {
     if (sh.hero) {
       sec.append(
         shelfHead('Deine Playlists', () => showInLibrary(sh.type, sh.order)),
-        el('div', { class: 'hero-row' }, Array.from({ length: 2 }, () => el('div', { class: 'hero skeleton' }))));
+        shelfBox('hero-row', Array.from({ length: 2 }, () => el('div', { class: 'hero skeleton' }))));
     } else {
       sec.append(
         shelfHead(sh.title, () => (sh.type === 'radio' ? setTab('radio') : showInLibrary(sh.type, sh.order))),
-        el('div', { class: 'shelf' }, Array.from({ length: 5 }, () => el('div', { class: 'card' }, el('div', { class: 'card-art skeleton' })))),
+        shelfBox('shelf', Array.from({ length: 5 }, () => el('div', { class: 'card' }, el('div', { class: 'card-art skeleton' })))),
       );
     }
     sections[sh.key] = sec;
@@ -1166,7 +1240,7 @@ async function loadHome() {
     const sec = sections[sh.key];
     if (!items.length) { sec.remove(); return; }
     filled++;
-    sec.lastElementChild.replaceChildren(...items.map(sh.hero ? heroNode : cardNode));
+    shelfRow(sec).replaceChildren(...items.map(sh.hero ? heroNode : cardNode));
   }));
   if (req === S.home.req && !filled) {
     box.append(el('p', { class: 'empty' }, 'Deine Mediathek ist noch leer. Über „Suchen“ findest du Musik bei deinen Musikdiensten.'));
@@ -1189,7 +1263,7 @@ async function loadMaRows(req, maTop, maLib, sections) {
     const title = (isLib && MA_ROW_TITLE[row.item_id]) || row.name;
     const sec = el('section', { class: 'home-section', dataset: { row: `${row.provider}/${row.item_id}` }, hidden: true },
       el('div', { class: 'shelf-head' }, el('h2', { class: 'shelf-title' }, title)),
-      el('div', { class: 'shelf' }));
+      shelfBox('shelf'));
     (isLib ? maLib : maTop).append(sec); // Reihenfolge wie vom Server geliefert
     let items = fromMaList(row.items);
     if (!items.length) {
@@ -1199,10 +1273,11 @@ async function loadMaRows(req, maTop, maLib, sections) {
     if (!items.length) { sec.remove(); return; }
     // Die erste Empfehlungs-Reihe eines Musikdienstes bekommt die großen Kacheln.
     if (!isLib && row === external[0]) {
-      sec.lastElementChild.className = 'hero-row';
-      sec.lastElementChild.replaceChildren(...items.slice(0, 12).map(heroNode));
+      const row = shelfRow(sec);
+      row.className = 'hero-row';
+      row.replaceChildren(...items.slice(0, 12).map(heroNode));
     } else {
-      sec.lastElementChild.replaceChildren(...items.slice(0, 20).map(cardNode));
+      shelfRow(sec).replaceChildren(...items.slice(0, 20).map(cardNode));
     }
     sec.hidden = false;
     S.home.maShown = true;
@@ -1390,16 +1465,23 @@ async function renderGenre(genre) {
   // 1) Bei den Musikdiensten: Suche nach dem Namen der Richtung
   (async () => {
     try {
-      const r = await S.conn.callService('music_assistant', 'search',
-        { config_entry_id: S.configEntryId, name: genre.query, limit: 14, library_only: false }, undefined, true);
+      const search = (name, extra = {}) => S.conn.callService('music_assistant', 'search',
+        { config_entry_id: S.configEntryId, name, limit: 40, library_only: false, ...extra }, undefined, true)
+        .then((r) => r?.response || {});
+      // Hauptsuche nach der Richtung, dazu weitere Playlists (z. B. „Rock Hits“)
+      const [res, more] = await Promise.all([
+        search(genre.query),
+        /hits/i.test(genre.query) ? {} : search(`${genre.query} Hits`, { media_type: ['playlist'], limit: 25 }).catch(() => ({})),
+      ]);
       if (!still()) return;
-      const res = r?.response || {};
+      const seen = new Set((res.playlists || []).map((x) => x.uri));
+      res.playlists = [...(res.playlists || []), ...(more.playlists || []).filter((x) => !seen.has(x.uri))];
       const nodes = [];
       for (const [key, label] of [['playlists', 'Playlists'], ['artists', 'Beispiel-Interpreten'], ['albums', 'Alben'], ['radio', 'Radiosender'], ['tracks', 'Titel']]) {
         const items = (res[key] || []).map(fromMa);
         if (!items.length) continue;
         nodes.push(el('h3', { class: 'section-title' }, label));
-        nodes.push(key === 'tracks' ? itemsNode(items.slice(0, 8), true) : el('div', { class: 'shelf' }, items.map(cardNode)));
+        nodes.push(key === 'tracks' ? itemsNode(items.slice(0, 12), true) : shelfBox('shelf', items.map(cardNode)));
       }
       if (nodes.length) nodes.push(el('p', { class: 'hint' }, `Das sind die Treffer deiner Musikdienste zum Begriff „${genre.query}“.`));
       catalog.replaceChildren(...(nodes.length ? nodes : [el('p', { class: 'empty' }, 'Dazu wurde bei deinen Musikdiensten nichts gefunden.')]));
@@ -1412,7 +1494,7 @@ async function renderGenre(genre) {
   try {
     const id = await maGenreId(genre);
     if (id == null || !still()) return;
-    const rows = await ma.send('music/genres/overview', { item_id: String(id), limit: 20 });
+    const rows = await ma.send('music/genres/overview', { item_id: String(id), limit: 40 });
     if (!still()) return;
     const nodes = [];
     for (const row of rows || []) {
@@ -1420,7 +1502,7 @@ async function renderGenre(genre) {
       if (!items.length) continue;
       const label = GENRE_ROW_TITLE[row.translation_key] || GENRE_ROW_TITLE[String(row.item_id || '').split('_').pop()] || row.name;
       nodes.push(el('h3', { class: 'section-title' }, `${label} aus deiner Mediathek`));
-      nodes.push(el('div', { class: 'shelf' }, items.map(cardNode)));
+      nodes.push(shelfBox('shelf', items.map(cardNode)));
     }
     mine.replaceChildren(...nodes);
   } catch { /* ohne Draht zu Music Assistant gibt es nur die Treffer der Musikdienste */ }
@@ -1695,6 +1777,7 @@ function bindUI() {
   $('#nowClose').addEventListener('click', closeNow);
   $('#nowMore').addEventListener('click', openNowMore);
   $('#queueBtn').addEventListener('click', openQueue);
+  $('#autoplayBtn').addEventListener('click', toggleAutoplay);
 
   $('#playBtn').addEventListener('click', togglePlay);
   $('#miniPlay').addEventListener('click', togglePlay);

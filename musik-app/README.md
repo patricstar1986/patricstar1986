@@ -26,6 +26,9 @@ darüber der Mini-Player, und ein Tipp darauf öffnet die große Wiedergabe-Ansi
 - **Dieses Gerät:** Das Handy bzw. der PC wird selbst zum Lautsprecher (siehe unten).
 - **Warteschlange:** mit direktem Draht zu Music Assistant die ganze Liste (Titel anspringen, entfernen),
   sonst aktueller und nächster Titel. Dazu Zufall und Leeren.
+- **Autoplay (∞):** Wenn die Warteschlange zu Ende ist, spielt Music Assistant passende Titel weiter.
+  Der Knopf sitzt in der Wiedergabe-Ansicht und in der Warteschlange (nur mit direktem Draht).
+- **Reihen blättern:** Am PC erscheinen an jeder Reihe Pfeile links und rechts, sobald die Maus darüber ist.
 - **Am PC** (breites Fenster): Seitenleiste mit Suche, Mediathek und deinen Playlists, Wiedergabeleiste oben.
 - **Abspielen-Optionen** (⋮): Jetzt abspielen, Warteschlange ersetzen, Als Nächstes,
   Zur Warteschlange hinzufügen, Radio starten.
@@ -154,6 +157,10 @@ Neuerscheinungen. Eine echte Liste „wer hat gerade ein neues Album“ bietet M
 „Neueste Alben“ zeigt deshalb nur Alben aus deiner Mediathek, sortiert nach Erscheinungsjahr.
 
 ## Warteschlange und Gruppieren
+
+- **Autoplay:** Das ∞-Symbol schaltet für das gewählte Gerät ein, dass nach dem letzten Titel passende
+  Musik weiterläuft. Welche Titel das sind, bestimmt Music Assistant zusammen mit deinem Musikdienst.
+  Die Einstellung gilt je Gerät und bleibt in Music Assistant gespeichert.
 
 - **Warteschlange:** Mit dem direkten Draht siehst du die ganze Liste ab dem aktuellen Titel, kannst
   Titel anspringen und entfernen. Ohne ihn gibt Home Assistant nur den aktuellen und den nächsten

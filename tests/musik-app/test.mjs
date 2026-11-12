@@ -86,6 +86,18 @@ await test('Startseite: große Kacheln, Reihen und Mini-Player', async () => {
   await shot(page, 'desktop-start');
 });
 
+await test('Reihen lassen sich mit Pfeilen durchblättern', async () => {
+  const wrap = '#home [data-shelf=recent] .shelf-wrap';
+  await page.hover(wrap);
+  await page.waitForSelector(`${wrap} .shelf-arrow.right:not([hidden])`);
+  assert.equal(await page.isVisible(`${wrap} .shelf-arrow.left`), false, 'am Anfang kein Pfeil nach links');
+  await page.click(`${wrap} .shelf-arrow.right`);
+  await page.waitForFunction((w) => document.querySelector(`${w} .shelf`).scrollLeft > 100, wrap);
+  await page.waitForSelector(`${wrap} .shelf-arrow.left:not([hidden])`);
+  await page.click(`${wrap} .shelf-arrow.left`);
+  await page.waitForFunction((w) => document.querySelector(`${w} .shelf`).scrollLeft < 8, wrap);
+});
+
 await test('Wiedergabe-Ansicht öffnen und steuern', async () => {
   assert.equal(await page.isVisible('#now'), false);
   await page.click('#miniOpen');
@@ -97,6 +109,7 @@ await test('Wiedergabe-Ansicht öffnen und steuern', async () => {
   assert.match(await page.getAttribute('#nowArt', 'src'), /\/api\/media_player_proxy\//);
   assert.equal(await page.textContent('#durTime'), '3:45');
   assert.equal(await page.isVisible('#powerBtn'), false, 'kein Ein/Aus bei Playern, die das nicht können');
+  assert.equal(await page.isVisible('#autoplayBtn'), false, 'Autoplay nur mit direktem Draht zu Music Assistant');
   await shot(page, 'desktop-wiedergabe');
 
   await page.click('#playBtn');
@@ -244,7 +257,10 @@ await test('Stöbern: Musikrichtung wählen, Beispiele aus Diensten und Mediathe
   await page.waitForSelector('#detail h3:has-text("Künstler aus deiner Mediathek")');
   const titles = await page.$$eval('#detail h3', (h) => h.map((x) => x.textContent));
   assert.deepEqual(titles, ['Radiosender', 'Künstler aus deiner Mediathek', 'Alben aus deiner Mediathek']);
-  assert.deepEqual(lastCall((x) => x.ma === 'music/genres/overview').args, { item_id: '7', limit: 20 });
+  assert.deepEqual(lastCall((x) => x.ma === 'music/genres/overview').args, { item_id: '7', limit: 40 });
+  const more = lastCall((x) => x.service === 'search' && x.data.name === 'Rock Hits');
+  assert.deepEqual(more.data.media_type, ['playlist'], 'zusätzliche Playlists zur Richtung');
+  assert.equal(await page.$$eval('#detail .shelf-wrap .shelf-arrow', (b) => b.length), 6, 'jede Reihe hat Pfeile');
   await shot(page, 'desktop-musikrichtung');
   await page.click('#detail .card:has-text("Innuendo") .card-hit');
   await page.waitForSelector('#detail .detail-title:has-text("Innuendo")');
@@ -275,6 +291,26 @@ await test('Vollständige Warteschlange: anzeigen, Titel anspringen, entfernen',
   await page.click('#queueList .row:nth-child(2) .icon-btn');
   assert.deepEqual((await waitCall(page, (x) => x.ma === 'player_queues/delete_item')).args, { queue_id: 'up20', item_id_or_index: 'qi5' });
   await page.waitForFunction(() => document.querySelectorAll('#queueList .row').length === 13);
+  await page.keyboard.press('Escape');
+});
+
+await test('Autoplay: passende Titel nach dem Ende der Warteschlange', async () => {
+  await page.click('#miniOpen');
+  await page.waitForSelector('#autoplayBtn:not([hidden])');
+  assert.equal(await page.getAttribute('#autoplayBtn', 'aria-pressed'), 'false');
+  await page.click('#autoplayBtn');
+  const c = await waitCall(page, (x) => x.ma === 'player_queues/autoplay');
+  assert.deepEqual(c.args, { queue_id: 'q_media_player.kuche_2', autoplay_enabled: true });
+  await page.waitForSelector('#autoplayBtn.active');
+  await shot(page, 'desktop-autoplay');
+  await page.click('#queueBtn');
+  await page.waitForSelector('#queueAutoplay:has-text("Autoplay: an")');
+  assert.match(await page.textContent('#sheetBody'), /spielt Music Assistant passende Titel weiter/);
+  await page.click('#queueAutoplay');
+  await page.waitForSelector('#queueAutoplay:has-text("Autoplay: aus")');
+  assert.equal(lastCall((x) => x.ma === 'player_queues/autoplay').args.autoplay_enabled, false);
+  await page.waitForSelector('#autoplayBtn:not(.active)');
+  await page.keyboard.press('Escape');
   await page.keyboard.press('Escape');
 });
 

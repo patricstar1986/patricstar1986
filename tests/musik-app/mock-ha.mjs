@@ -27,7 +27,7 @@ function player(entity_id, name, state, extra = {}) {
     entity_id, state,
     attributes: {
       group_members: [], volume_level: 0.2, is_volume_muted: false, app_id: 'music_assistant',
-      mass_player_type: 'player', device_class: 'speaker', friendly_name: name,
+      mass_player_type: 'player', active_queue: 'q_' + entity_id, device_class: 'speaker', friendly_name: name,
       supported_features: MA_FEATURES, shuffle: false, repeat: 'off', ...extra,
     },
     last_changed: new Date().toISOString(), last_updated: new Date().toISOString(), context: { id: 'x' },
@@ -402,6 +402,8 @@ export function startMock({ port = 8123, quiet = false } = {}) {
           ok(all.slice(0, 5), true);
           return ok(all.slice(5));
         }
+        case 'player_queues/get': return ok({ queue_id: a.queue_id, active: true, items: 18, autoplay_enabled: !!st.autoplay?.[a.queue_id], dont_stop_the_music_enabled: !!st.autoplay?.[a.queue_id] });
+        case 'player_queues/autoplay': st.autoplay = { ...(st.autoplay || {}), [a.queue_id]: a.autoplay_enabled }; return ok(null);
         case 'player_queues/play_index': return ok(null);
         case 'player_queues/delete_item': st.maQueueLength = (st.maQueueLength ?? 18) - 1; return ok(null);
         default: return ws.send(JSON.stringify({ message_id: msg.message_id, error_code: 1, details: `Unbekannter Befehl ${msg.command}` }));

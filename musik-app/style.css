@@ -532,3 +532,23 @@ main {
   .shelf > .card { flex-basis: 200px; }
   .genre-tile { height: 110px; }
 }
+
+/* ---------- Reihen mit Pfeilen zum Blättern ---------- */
+.shelf-wrap { position: relative; }
+.shelf-arrow { display: none; }
+@media (hover: hover) and (min-width: 700px) {
+  .shelf-arrow {
+    display: inline-flex; align-items: center; justify-content: center;
+    position: absolute; top: 42%; transform: translateY(-50%); z-index: 3;
+    width: 44px; height: 44px; border-radius: 50%;
+    background: color-mix(in srgb, var(--bg-2) 92%, transparent); color: var(--fg);
+    border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0,0,0,.35);
+    opacity: 0; transition: opacity .15s, transform .15s;
+  }
+  .shelf-arrow.left { left: -14px; }
+  .shelf-arrow.right { right: -14px; }
+  .shelf-wrap:hover .shelf-arrow, .shelf-arrow:focus-visible { opacity: 1; }
+  .shelf-arrow:hover { transform: translateY(-50%) scale(1.08); }
+  .shelf-arrow .ico { width: 28px; height: 28px; }
+}
+#autoplayBtn.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); }
