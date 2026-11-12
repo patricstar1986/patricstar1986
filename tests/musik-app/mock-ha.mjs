@@ -283,6 +283,8 @@ export function startMock({ port = 8123, quiet = false } = {}) {
     }
     if (url.pathname.startsWith('/local/musik/')) {
       const rel = url.pathname.slice('/local/musik/'.length) || 'index.html';
+      if (rel === 'index.html') st.indexRequests = (st.indexRequests || 0) + 1;
+      res.setHeader('Cache-Control', 'public, max-age=31536000'); // wie ein Server, der lange zwischenspeichern lässt
       const file = path.join(APP_DIR, rel);
       if (!file.startsWith(APP_DIR) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream' });

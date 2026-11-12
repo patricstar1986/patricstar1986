@@ -130,7 +130,9 @@ async function openApp() {
     const r = await probe(base);
     if (r === 'ok') {
       currentBase = base;
-      await win.loadURL(base + APP_PATH).catch(() => {});
+      // Startseite immer frisch aus Home Assistant holen, nie aus dem Zwischenspeicher
+      // (sonst bleibt nach einem Update in /config/www/musik die alte Version stehen).
+      await win.loadURL(base + APP_PATH, { extraHeaders: 'Cache-Control: no-cache\nPragma: no-cache\n' }).catch(() => {});
       return;
     }
     if (r === 'fehlt') missing = base;
@@ -181,6 +183,10 @@ function buildMenu() {
       submenu: [
         { label: 'Adressen ändern …', accelerator: 'Ctrl+,', click: () => showSetup() },
         { label: 'Neu laden', accelerator: 'F5', click: () => openApp() },
+        {
+          label: 'Neu laden ohne Zwischenspeicher', accelerator: 'Ctrl+F5',
+          click: async () => { await session.defaultSession.clearCache(); openApp(); },
+        },
         { type: 'separator' },
         {
           label: 'Medientasten der Tastatur verwenden', type: 'checkbox', checked: config.mediaKeys,
@@ -248,9 +254,15 @@ if (!app.requestSingleInstanceLock()) {
     if (win.isMinimized()) win.restore();
     win.focus();
   });
-  app.whenReady().then(() => {
+  app.whenReady().then(async () => {
     if (process.platform === 'win32') app.setAppUserModelId('musik.musicassistant.windows');
     loadConfig();
+    // Nach einem Update des Windows-Programms einmal den Zwischenspeicher leeren.
+    if (config.lastVersion !== app.getVersion()) {
+      await session.defaultSession.clearCache().catch(() => {});
+      config.lastVersion = app.getVersion();
+      saveConfig();
+    }
     // Die Seite braucht keine Sonderrechte (Kamera, Standort, Benachrichtigungen …).
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
     buildMenu();

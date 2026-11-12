@@ -38,6 +38,7 @@ Entfernen: Windows-Einstellungen → Apps → „Musik“ → Deinstallieren.
 |---|---|
 | Strg + , | Adressen ändern |
 | F5 | Neu laden (probiert die Adressen neu durch) |
+| Strg + F5 | Neu laden ohne Zwischenspeicher |
 | Strg + P | Wiedergabe / Pause |
 | Strg + → / ← | Nächster / vorheriger Titel |
 | F11 | Vollbild |
@@ -48,6 +49,8 @@ Entfernen: Windows-Einstellungen → Apps → „Musik“ → Deinstallieren.
   als „Windows-PC (Musik-App)“. Über die Adresse zu Hause (`http://`) verbindet er sich direkt
   mit Music Assistant, über Nabu Casa nur mit einem Admin-Konto.
 - **Anmeldung je Adresse:** Zu Hause und über Nabu Casa meldest du dich je einmal an.
+- **Updates der Oberfläche** kommen beim nächsten Start von selbst: Die Startseite wird immer
+  frisch aus Home Assistant geholt. Falls doch einmal eine alte Version erscheint: Strg + F5.
 - **Keine automatischen Updates** des Windows-Programms. Für eine neue Version den neuen
   Installer ausführen, er ersetzt die alte.
 - Fremde Internetseiten öffnet das Programm nie im eigenen Fenster, sondern im Standardbrowser.

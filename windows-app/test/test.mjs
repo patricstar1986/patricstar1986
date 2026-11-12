@@ -90,6 +90,16 @@ await test('Wiedergabe-Befehle aus Windows (Menü, Medientasten, Taskleiste) ste
   console.log('        Medientasten registriert:', keys.join(', '), '(unter Linux/Xvfb evtl. nicht möglich)');
 });
 
+await test('Startseite kommt immer frisch aus Home Assistant (kein Zwischenspeicher)', async () => {
+  const before = mock.state.indexRequests || 0;
+  await page.evaluate(() => { document.title = 'alt'; });
+  await clickMenu(app, 0, 1); // F5
+  await page.waitForSelector('#app:not([hidden])');
+  await clickMenu(app, 0, 2); // Strg + F5
+  await page.waitForSelector('#app:not([hidden])');
+  assert.ok((mock.state.indexRequests || 0) >= before + 2, `index.html neu geladen (${before} → ${mock.state.indexRequests})`);
+});
+
 await test('Fremde Adressen werden nicht im Fenster geöffnet', async () => {
   await app.evaluate(({ shell }) => { shell.openExternal = async (url) => { globalThis.__extern = url; }; });
   await page.evaluate(() => { location.href = 'https://example.com/irgendwo'; });

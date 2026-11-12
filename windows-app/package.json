@@ -1,7 +1,7 @@
 {
   "name": "musik-windows",
   "productName": "Musik",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Musik – Music Assistant über Home Assistant (Windows-App)",
   "author": "patricstar1986",
   "license": "UNLICENSED",
