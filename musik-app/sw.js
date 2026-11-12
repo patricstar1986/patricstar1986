@@ -1,9 +1,9 @@
 // Service Worker: hält nur die App-Dateien für einen schnellen Start bereit.
 // Anfragen an Home Assistant (/api, /auth, Bilder) werden nie zwischengespeichert.
 // Läuft nur über https (oder localhost) – über http lässt der Browser ihn weg, die App geht trotzdem.
-const CACHE = 'musik-v5';
+const CACHE = 'musik-v6';
 const SCOPE_PATH = new URL('./', self.location).pathname;
-const FILES = ['./', 'index.html', 'style.css?v=2.2.0', 'app.js?v=2.2.0', 'ha.js?v=2.2.0', 'local.js?v=2.2.0', 'ingress.js?v=2.2.0', 'ma.js?v=2.2.0', 'manifest.webmanifest', 'version.json', 'icons/icon.svg', 'icons/icon-192.png'];
+const FILES = ['./', 'index.html', 'style.css?v=2.2.1', 'app.js?v=2.2.1', 'ha.js?v=2.2.1', 'local.js?v=2.2.1', 'ingress.js?v=2.2.1', 'ma.js?v=2.2.1', 'manifest.webmanifest', 'version.json', 'icons/icon.svg', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(FILES)).catch(() => {}).then(() => self.skipWaiting()));

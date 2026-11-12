@@ -2,12 +2,12 @@
 import {
   AuthError, loadAuth, saveAuth, normalizeUrl, servedByHomeAssistant, startLogin,
   finishLoginFromUrl, logout, HAConnection, F, supports, currentPosition, formatTime,
-} from './ha.js?v=2.2.0';
-import { LocalPlayer, defaultDeviceName } from './local.js?v=2.2.0';
-import { Ingress } from './ingress.js?v=2.2.0';
-import { MusicAssistantApi } from './ma.js?v=2.2.0';
+} from './ha.js?v=2.2.1';
+import { LocalPlayer, defaultDeviceName } from './local.js?v=2.2.1';
+import { Ingress } from './ingress.js?v=2.2.1';
+import { MusicAssistantApi } from './ma.js?v=2.2.1';
 
-const APP_VERSION = '2.2.0';
+const APP_VERSION = '2.2.1';
 const PAGE = 50;
 const SETTINGS_KEY = 'musikapp.settings';
 const GROUPING = 524288; // MediaPlayerEntityFeature.GROUPING
@@ -1717,6 +1717,18 @@ function bindUI() {
     runSearch();
   }, 350);
   $('#sideSearch').addEventListener('input', sideSearch);
+  // Playlists in der Seitenleiste ein- und ausklappen (wird gemerkt)
+  const applyPlaylistsCollapsed = () => {
+    const collapsed = !!S.settings.playlistsCollapsed;
+    $('#sidePlaylistsWrap').hidden = collapsed;
+    $('#sidePlaylistsToggle').setAttribute('aria-expanded', String(!collapsed));
+  };
+  applyPlaylistsCollapsed();
+  $('#sidePlaylistsToggle').addEventListener('click', () => {
+    S.settings.playlistsCollapsed = !S.settings.playlistsCollapsed;
+    saveSettings();
+    applyPlaylistsCollapsed();
+  });
   document.querySelectorAll('.side-item[data-lib]').forEach((b) => b.addEventListener('click', () => showInLibrary(b.dataset.lib, b.dataset.order || 'name')));
   $('#shuffleBtn').addEventListener('click', () => svc('shuffle_set', { shuffle: !currentPlayer()?.attributes?.shuffle }));
   $('#repeatBtn').addEventListener('click', () => {

@@ -278,6 +278,23 @@ await test('Vollständige Warteschlange: anzeigen, Titel anspringen, entfernen',
   await page.keyboard.press('Escape');
 });
 
+await test('Seitenleiste: Playlists ein- und ausklappen, Zustand bleibt erhalten', async () => {
+  await page.waitForSelector('#sidePlaylists .side-item');
+  assert.equal(await page.isVisible('#sidePlaylists'), true);
+  await page.click('#sidePlaylistsToggle');
+  assert.equal(await page.isVisible('#sidePlaylists'), false);
+  assert.equal(await page.isVisible('.side-item[data-lib=playlist]'), false);
+  assert.equal(await page.getAttribute('#sidePlaylistsToggle', 'aria-expanded'), 'false');
+  assert.equal(await page.isVisible('.side-item[data-lib=album]'), true, 'der Rest der Seitenleiste bleibt');
+  await page.reload();
+  await page.waitForSelector('#app:not([hidden])');
+  assert.equal(await page.isVisible('#sidePlaylists'), false, 'nach Neuladen weiter eingeklappt');
+  await page.click('#sidePlaylistsToggle');
+  await page.waitForSelector('#sidePlaylists .side-item');
+  await page.click('#sidePlaylists .side-item:has-text("Playlist 02")');
+  await page.waitForSelector('#detail .detail-title:has-text("Playlist 02")');
+});
+
 await test('Radio: eigener Bereich mit den Sendern der Mediathek', async () => {
   await page.click('.tab[data-tab=radio]');
   assert.equal(await page.textContent('#pageTitle'), 'Radio');

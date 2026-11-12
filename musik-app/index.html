@@ -13,7 +13,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="style.css?v=2.2.0">
+  <link rel="stylesheet" href="style.css?v=2.2.1">
   <title>Musik</title>
 </head>
 <body>
@@ -68,9 +68,13 @@
         <button class="side-item" data-lib="artist"><span class="ico small" data-icon="artist"></span><span>Künstler</span></button>
         <button class="side-item" data-lib="album"><span class="ico small" data-icon="album"></span><span>Alben</span></button>
         <button class="side-item" data-lib="track"><span class="ico small" data-icon="note"></span><span>Titel</span></button>
-        <div class="side-label">Playlists</div>
-        <button class="side-item" data-lib="playlist"><span class="ico small" data-icon="grid"></span><span>Alle Playlists</span></button>
-        <div id="sidePlaylists"></div>
+        <button id="sidePlaylistsToggle" class="side-label" aria-expanded="true" aria-controls="sidePlaylistsWrap">
+          <span>Playlists</span><span class="ico small" data-icon="down"></span>
+        </button>
+        <div id="sidePlaylistsWrap">
+          <button class="side-item" data-lib="playlist"><span class="ico small" data-icon="grid"></span><span>Alle Playlists</span></button>
+          <div id="sidePlaylists"></div>
+        </div>
       </div>
     </nav>
 
@@ -232,6 +236,6 @@
 
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
-  <script type="module" src="app.js?v=2.2.0"></script>
+  <script type="module" src="app.js?v=2.2.1"></script>
 </body>
 </html>
